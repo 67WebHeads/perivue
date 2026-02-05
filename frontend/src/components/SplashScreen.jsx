@@ -2,13 +2,13 @@ import React from 'react'
 import splash_art_perivue from '../assets/splash_art_perivue.webp'
 function SplashScreen({fading}) {
   return (
-    <div className={`flex flex-col text-white items-center justify-center min-h-screen bg-zinc-800 fixed  ${fading ? "fade-out" : ""}`}>
+    <div className={`flex flex-col text-white items-center justify-center min-h-screen min-w-screen bg-dark fixed  ${fading ? "fade-out" : ""}`}>
         <img
             src={splash_art_perivue}
             alt="Splash"
-            className="w-full h-full object-cover"
+            className="w-[500px] h-[500px] object-contain "
+            // 1/2
         />
-        <span className='text-sm md:text-sm'>Manual • Central • Peripheral </span>
     </div>
   )
 }

@@ -17,15 +17,15 @@ function App() {
     }, 3000);
   }, []);
 
-  if (loading) {
-    return <SplashScreen fading={fadeSplash} />;
-  }
+    // if (loading) {
+    //   return <SplashScreen fading={fadeSplash} />;
+    // }
 
   
   
   return (
     <div className="fade-in">
-      <Home />
+      <Login />
     </div>
   )
   // return <Login/>
