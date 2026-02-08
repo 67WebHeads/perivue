@@ -35,7 +35,7 @@ function Home() {
             {[1, 2, 3,4].map((_, i) => (
               <div
                 key={i}
-                className="shadow-lg aspect-square w-full flex flex-col p-3 rounded-2xl hover:scale-[1.02] transition-transform duration-200 cursor-pointer bg-lavender text-white"
+                className="shadow-lg aspect-square md:h-[200x] md:w-[200px] md:aspect-auto  flex flex-col p-3 rounded-2xl hover:scale-[1.02] transition-transform duration-200 cursor-pointer bg-lavender text-white"
               >
                 <div className="flex justify-between items-start">
                   <span className="text-xs md:text-lg leading-tight">
