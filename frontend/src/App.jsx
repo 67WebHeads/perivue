@@ -21,11 +21,10 @@ function App() {
     //   return <SplashScreen fading={fadeSplash} />;
     // }
 
-  
-  
   return (
     <div className="fade-in">
-      <Login />
+      <Home/>
+      {/* <Login/> */}
     </div>
   )
   // return <Login/>
