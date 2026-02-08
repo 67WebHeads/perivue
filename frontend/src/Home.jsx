@@ -58,25 +58,25 @@ function Home() {
 
       {/* bottom navbar */}
       <div className="h-[10vh] flex items-center justify-center">
-        <div className=" w-[80%] md:w-1/2 lg:w-1/3 py-1 md:py-2 rounded-full shadow-md  bg-lavender flex items-center justify-center space-x-8 text-5xl  ">  
+        <div className=" w-fit px-8 py-0.5 rounded-full shadow-md  bg-lavender flex items-center justify-center space-x-8 text-5xl  ">  
             {/* informations */}
             <button
               onClick={() => {}}
-              className=" flex items-center justify-center text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
+              className=" flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
             >
               <PersonIcon fontSize="inherit" sx={{color:'#2D4066'}} />
             </button>
             {/* dashboard */}
             <button
               onClick={() => {}}
-              className=" flex items-center justify-center text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer"
+              className=" flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer"
             >
-              <SpaceDashboardIcon fontSize="inherit" sx={{color:'#2D4066',fontSize:'inherit'}} />
+              <SpaceDashboardIcon fontSize="inherit" sx={{color:'#2D4066'}} />
             </button>
             {/* test */}
             <button
               onClick={() => {}}
-              className="hidden md:flex items-center justify-center text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
+              className="hidden md:flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
             >
               <AddIcon fontSize="inherit" sx={{color:'#2D4066'}} />
             </button>
