@@ -5,9 +5,13 @@ html, body{
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background-color: #27272A;
 }
 @theme{
   --color-dark: #172130;
+  --color-lavender:#BCA8E0;
+  --color-icons:#2D4066;
+  --color-outline:#2D4066
 }
 
 
