@@ -49,7 +49,7 @@ function Home() {
 
                 <div className="flex-1" />
 
-                <p className="text-5xl md:text-6xl font-semibold text-white">98</p>
+                <p className="text-5xl md:text-6xl font-semibold text-white">92</p>
               </div>
             ))}
           </div>
