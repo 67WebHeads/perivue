@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  #database
+  # db:
+  #   image: postgres:15
+  #   # env_file:
+  #   #   - ./backend/.env
+  #   ports:
+  #     - "5432:5432"   
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+      # - ./backend/initial_scripts/0_manual_tables.sql:/docker-entrypoint-initdb.d/init_data.sql
+      # - ./db/init/0_manual_tables.sql:/docker-entrypoint-initdb.d/0_manual_tables.sql
+
+  #pgAdmin
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   env_file:
+  #     - ./backend/.env
+  #   ports:
+  #     - "8080:80"
+
+  # Django backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    # entrypoint: sh /app/entrypoint.sh
+    ports:
+      - "8000:8000"
+    # depends_on:
+    #   - db
+    container_name: perviue-backend
+    # env_file:
+    #   - ./backend/.env
+    command: python manage.py runserver 0.0.0.0:8000
+    # volumes:
+    #   - ./backend:/app   
+
+  # frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: perviue--frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    command: npm run dev -- --host
+    volumes:
+      - ./frontend:/app   
+      - /app/node_modules
+    # env_file:
+    #   - ./frontend/.env
+  #remove?
+  
+# volume from psotgres, 
+volumes:
+  pgdata:
+  
+# notes:
+# docker compose up -d (start containers) or..
+# docker compose down -v (hard resets w/ volumes)
+# docker compose down (containers shuts down)
+# !!upon loading, make sure to do: docker compose exec backend python manage.py seed_dev_user (this will load the mickeymouse account)
