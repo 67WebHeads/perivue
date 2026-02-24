@@ -1,0 +1,60 @@
+
+# ======================
+# React / Node.js
+# ======================
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ======================
+# Django / Python
+# ======================
+
+# Virtual environments
+venv/
+backend/venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django database
+*.sqlite3
+db.sqlite3
+
+# Environment variables
+.env
+backend/.env
+frontend/.env
+
+# Django static/media (if collected)
+backend/staticfiles/
+backend/media/
+
+# Python packaging
+*.egg-info/
+.eggs/
+build/
