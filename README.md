@@ -286,3 +286,79 @@ Open:
 ```
 http://localhost:5173/
 ```
+
+# 🐳 Docker Setup – `docker-container` Branch
+
+This branch contains a **fully containerized setup** with **separate development and production configurations**.
+
+You do **not** need to change any application code.
+You only choose **how Docker runs the app**.
+
+---
+
+## 📦 Requirements
+
+* Docker Desktop (Windows / macOS / Linux)
+* Docker Compose v2 (included with Docker Desktop)
+
+Verify:
+
+```bash
+docker --version
+docker compose version
+```
+
+---
+
+## 📁 Project Structure (Important)
+
+```text
+backend/
+├── Dockerfile.dev       # Development image
+├── Dockerfile.prod      # Production (AWS-ready) image
+├── entrypoint.sh
+└── ...
+
+frontend/
+├── Dockerfile.dev
+├── Dockerfile.prod
+└── ...
+
+docker-compose.dev.yml   # Daily development
+docker-compose.prod.yml  # Production-style (not implemented)
+```
+---
+
+## 🧠 Quick Command Cheat Sheet
+
+```text
+
+REBUILD and first build:
+docker compose -f docker-compose.dev.yml up --build
+
+DAILY START:
+docker compose -f docker-compose.dev.yml up
+
+STOP:
+docker compose -f docker-compose.dev.yml down
+
+REBUILD and first build:
+docker compose -f docker-compose.dev.yml up --build
+
+CLEAN RESET:
+docker compose -f docker-compose.dev.yml down -v
+```
+
+---
+
+## ✅ Summary
+
+* Same application code
+* Two Docker execution modes:
+
+  * **DEV** → daily work
+  * **PROD** →production validation
+* Dockerfiles are multi-stage and compliant
+---
+
+**You’re ready to work. Just run DEV mode and code.** 🚀
