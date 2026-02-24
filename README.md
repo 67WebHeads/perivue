@@ -1,9 +1,3 @@
-Here’s a clean, professional **README.md** you can place inside your `backend/` folder.
-
-You can copy-paste this directly.
-
----
-
 # PeriVue Backend Setup Guide
 
 ## 📦 Requirements
