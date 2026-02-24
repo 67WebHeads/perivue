@@ -1,7 +1,7 @@
-import React from 'react'
-import CustomInput from '../../components/CustomInput'
-import GoogleIcon from '@mui/icons-material/Google';
-import splash_art_perivue from '../../assets/splash_art_perivue.png'
+import React from "react";
+import CustomInput from "../../components/CustomInput";
+import GoogleIcon from "@mui/icons-material/Google";
+import splash_art_perivue from "../../assets/splash_art_perivue.png";
 function Login() {
   return (
     <div className="flex items-center justify-center flex-col">
@@ -20,7 +20,7 @@ function Login() {
         </button>
       </div>
     </div>
-  )
+  );
 }
 
-export default Login
+export default Login;

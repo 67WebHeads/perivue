@@ -1,5 +1,5 @@
-import React from 'react'
-import splash_art_perivue from '../assets/splash_art_perivue.png'
+import React from "react";
+import splash_art_perivue from "../assets/splash_art_perivue.png";
 
 function SplashScreen({fading}) {
   return (
@@ -11,7 +11,7 @@ function SplashScreen({fading}) {
         />
         {/* <span className='text-sm md:text-sm'>Manual • Central • Peripheral </span> */}
     </div>
-  )
+  );
 }
 
 export default SplashScreen;

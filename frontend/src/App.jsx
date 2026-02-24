@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react'
-import SplashScreen from './components/SplashScreen';
-import Home from './Home.jsx'
-import Login from './pages/auth/login.jsx';
+import React, { useEffect, useState } from "react";
+import SplashScreen from "./components/SplashScreen";
+import Home from "./Home.jsx";
+import Login from "./pages/auth/login.jsx";
 
 function App() {
   // declare sessions din dito
@@ -26,9 +26,9 @@ function App() {
       <Home/>
       {/* <Login/> */}
     </div>
-  )
+  );
   // return <Login/>
   // if (!user) return <Login />;
 }
 
-export default App
+export default App;

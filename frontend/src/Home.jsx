@@ -1,9 +1,9 @@
-import React from 'react'
-import ArrowOutwardIcon from '@mui/icons-material/ArrowOutward';
-import SpaceDashboardIcon from '@mui/icons-material/SpaceDashboard';
-import AddIcon from '@mui/icons-material/Add';
-import PersonIcon from '@mui/icons-material/Person';
-import NightsStayIcon from '@mui/icons-material/NightsStay';
+import React from "react";
+import ArrowOutwardIcon from "@mui/icons-material/ArrowOutward";
+import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
+import AddIcon from "@mui/icons-material/Add";
+import PersonIcon from "@mui/icons-material/Person";
+import NightsStayIcon from "@mui/icons-material/NightsStay";
 
 function Home() {
   return (
@@ -43,7 +43,7 @@ function Home() {
                   </span>
 
                   <div className="outline w-4 h-4 md:w-6 md:h-6 rounded-full flex items-center justify-center outline-outline bg-white/50">
-                    <ArrowOutwardIcon fontSize="inherit" sx={{color:'#2D4066'}} />
+                    <ArrowOutwardIcon fontSize="inherit" sx={{color:"#2D4066"}} />
                   </div>
                 </div>
 
@@ -64,26 +64,26 @@ function Home() {
               onClick={() => {}}
               className=" flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
             >
-              <PersonIcon fontSize="inherit" sx={{color:'#2D4066'}} />
+              <PersonIcon fontSize="inherit" sx={{color:"#2D4066"}} />
             </button>
             {/* dashboard */}
             <button
               onClick={() => {}}
               className=" flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer"
             >
-              <SpaceDashboardIcon fontSize="inherit" sx={{color:'#2D4066'}} />
+              <SpaceDashboardIcon fontSize="inherit" sx={{color:"#2D4066"}} />
             </button>
             {/* test */}
             <button
               onClick={() => {}}
               className="hidden md:flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
             >
-              <AddIcon fontSize="inherit" sx={{color:'#2D4066'}} />
+              <AddIcon fontSize="inherit" sx={{color:"#2D4066"}} />
             </button>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default Home
+export default Home;
