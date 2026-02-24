@@ -139,11 +139,3 @@ http://127.0.0.1:8000/api/health/
 ```
 
 You should see JSON response if the API is configured.
-
----
-
-If you'd like, I can now create:
-
-* A production-ready README (with PostgreSQL + .env)
-* A Docker version
-* Or a full-stack setup README (frontend + backend combined)
