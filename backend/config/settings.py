@@ -74,8 +74,12 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "perivue_db",
+        "USER": "perivue_user",
+        "PASSWORD": "P3r1vu3!",
+        "HOST": "localhost",
+        "PORT": "5432",
     }
 }
 
