@@ -3,4 +3,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [tailwindcss()],
+  server: {
+    host: true,
+    watch: {
+      usePolling: true,
+      interval: 100
+    }
+  }
 });
