@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import SplashScreen from "./components/SplashScreen";
 import Home from "./Home.jsx";
-import Login from "./pages/auth/login.jsx";
+// import Login from "./pages/auth/login.jsx";
 
 function App() {
   // declare sessions din dito
