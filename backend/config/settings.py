@@ -78,11 +78,10 @@ DATABASES = {
         "NAME": "perivue_db",
         "USER": "perivue_user",
         "PASSWORD": "P3r1vu3!",
-        "HOST": "localhost",
+        "HOST": "127.0.0.1",
         "PORT": "5432",
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
