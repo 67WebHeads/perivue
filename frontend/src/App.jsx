@@ -23,8 +23,7 @@ function App() {
 
   return (
     <div className="fade-in">
-      <Home/>
-      {/* <Login/> */}
+      <Home/> 
     </div>
   );
   // return <Login/>

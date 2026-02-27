@@ -71,14 +71,14 @@ function Home() {
               onClick={() => {}}
               className=" flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer"
             >
-              <SpaceDashboardIcon fontSize="inherit" sx={{color:"#2D4066"}} />
+              <AddIcon fontSize="inherit" sx={{color:"#2D4066"}} />
             </button>
             {/* test */}
             <button
               onClick={() => {}}
               className="hidden md:flex items-center justify-center text-4xl md:text-5xl text-black active:scale-[0.95] transition-transform duration-200 cursor-pointer "
             >
-              <AddIcon fontSize="inherit" sx={{color:"#2D4066"}} />
+              <SpaceDashboardIcon fontSize="inherit" sx={{color:"#2D4066"}} />
             </button>
         </div>
       </div>
