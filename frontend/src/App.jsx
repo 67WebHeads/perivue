@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import SplashScreen from "./components/SplashScreen";
 import Home from "./Home.jsx";
-// import Login from "./pages/auth/login.jsx";
+import Layout from "./components/Layout.jsx";
+
 
 function App() {
   // declare sessions din dito
@@ -23,7 +24,7 @@ function App() {
 
   return (
     <div className="fade-in">
-      <Home/> 
+      <Layout/>
     </div>
   );
   // return <Login/>
