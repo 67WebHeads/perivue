@@ -4,6 +4,7 @@ import Dashboard from "../pages/general/Dashboard";
 import background from '../assets/PeriVue_Background.webp'
 import splash_art_perivue from "../assets/splash_art_perivue.png";
 import SpaceDashboardIcon from '@mui/icons-material/SpaceDashboard';
+import GroupIcon from '@mui/icons-material/Group';
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
@@ -12,7 +13,7 @@ function Layout() {
 
   const navItems = [
     { path: "/", label: "Dashboard", icon: <SpaceDashboardIcon/> },
-    { path: "/users", label: "Users", icon: "" },
+    { path: "/users", label: "Users", icon: <GroupIcon/> },
     { path: "/settings", label: "Settings", icon: "" },
   ];
 
