@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import Dashboard from "../pages/general/Dashboard";
-import background from '../assets/PeriVue_Background.webp'
+import background from "../assets/PeriVue_Background.webp";
 import splash_art_perivue from "../assets/splash_art_perivue.png";
-import SpaceDashboardIcon from '@mui/icons-material/SpaceDashboard';
-import GroupIcon from '@mui/icons-material/Group';
-import AddIcon from '@mui/icons-material/Add';
+import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
+import GroupIcon from "@mui/icons-material/Group";
+import AddIcon from "@mui/icons-material/Add";
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
@@ -120,7 +120,6 @@ function Layout() {
             </div>
             {!isMobile && (
               <button
-                onClick={() => console.log("Add clicked")}
                 className="
                   absolute bottom-8 right-8
                   flex items-center gap-2 p-4 rounded-full
