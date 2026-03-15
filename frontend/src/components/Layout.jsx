@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import Dashboard from "../pages/general/Dashboard";
 import background from "../assets/PeriVue_Background.webp";
 import splash_art_perivue from "../assets/splash_art_perivue.png";
 import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
 import GroupIcon from "@mui/icons-material/Group";
 import AddIcon from "@mui/icons-material/Add";
+import Records from "../pages/general/Records";
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+
   const location = useLocation();
 
   const navItems = [
     { path: "/", label: "Dashboard", icon: <SpaceDashboardIcon /> },
-    { path: "/users", label: "Users", icon: <GroupIcon /> },
+    { path: "/records", label: "Users", icon: <GroupIcon /> },
     { path: "/settings", label: "Settings", icon: "" },
   ];
 
@@ -116,11 +118,13 @@ function Layout() {
           </aside>
           <main className="flex-1 overflow-y-auto relative">
             <div className="h-full m-2 bg-white/5 border border-white/10 rounded-2xl overflow-x-hidden p-4">
-              <Dashboard />
+              <Outlet/>
             </div>
-            {!isMobile && (
+            {/* {!isMobile && (
               <button
-                className="
+                onMouseEnter={() => setIsHovering(true)}
+                onMouseLeave={() => setIsHovering(false)}
+                className={`
                   absolute bottom-8 right-8
                   flex items-center gap-2 p-4 rounded-full
                   bg-white/20 hover:bg-white/30
@@ -129,12 +133,14 @@ function Layout() {
                   backdrop-blur-sm
                   shadow-lg hover:shadow-xl
                   transition-all duration-200
-                  hover:scale-105 active:scale-95
-                "
+                  hover:scale-105 active:scale-95 hover:cursor-pointer
+                  
+                `}
               >
                 <AddIcon fontSize="small" />
+                
               </button>
-            )}
+            )} */}
           </main>
         </div>
 

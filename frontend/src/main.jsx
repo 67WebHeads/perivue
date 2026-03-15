@@ -7,17 +7,17 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import App from "./App.jsx";
 import Home from "./Home.jsx";
 import Login from "./pages/auth/Login.jsx";
+import Dashboard from "./pages/general/Dashboard.jsx";
+import Records from "./pages/general/Records.jsx";
+import Layout from "./components/Layout.jsx";
 
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
     <StrictMode>
       <AuthProvider>
         <Routes>
-          {/* Public routes */}
           <Route path="/" element={<App />} />
           <Route path="/login" element={<Login />} />
-
-          {/* Protected routes */}
           <Route
             path="/home"
             element={
@@ -26,6 +26,10 @@ createRoot(document.getElementById("root")).render(
               </ProtectedRoute>
             }
           />
+          <Route element={<Layout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/records" element={<Records />} />
+          </Route>
         </Routes>
       </AuthProvider>
     </StrictMode>
