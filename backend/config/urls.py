@@ -36,4 +36,6 @@ urlpatterns = [
     path("api/auth/registration/", include("dj_rest_auth.registration.urls")),
     # Users
     path("api/users/", include("users.urls")),
+    # Patients
+    path("api/patients/", include("patients.urls")),
 ]

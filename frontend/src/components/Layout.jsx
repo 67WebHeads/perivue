@@ -15,7 +15,7 @@ function Layout() {
   const location = useLocation();
 
   const navItems = [
-    { path: "/", label: "Dashboard", icon: <SpaceDashboardIcon /> },
+    { path: "/home", label: "Dashboard", icon: <SpaceDashboardIcon /> },
     { path: "/records", label: "Users", icon: <GroupIcon /> },
     { path: "/settings", label: "Settings", icon: "" },
   ];

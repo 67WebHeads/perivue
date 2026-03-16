@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "dj_rest_auth.registration",
     # Local
     "users",
+    "patients",
 ]
 
 MIDDLEWARE = [
@@ -111,6 +112,14 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
+]
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "origin",
+    "x-clinic-id",
 ]
 
 # Authentication Backends

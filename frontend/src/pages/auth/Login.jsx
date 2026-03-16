@@ -7,14 +7,13 @@ import { useAuth } from "../../context/AuthContext";
 
 function Login() {
   const [testEmail, setTestEmail] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);
 
   const { login } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
 
-  // Redirect to the page they originally tried to visit, or /home
   const from = location.state?.from?.pathname || "/home";
 
   const handleGoogleLogin = () => {
@@ -24,7 +23,6 @@ function Login() {
   const handleTestLogin = async () => {
     setError("");
     setLoading(true);
-
     try {
       const res = await fetch(`${API_BASE_URL}/api/users/test-login/`, {
         method: "POST",
@@ -39,9 +37,15 @@ function Login() {
         return;
       }
 
-      await login(data.access, data.refresh);
-      navigate(from, { replace: true });
-    } catch (err) {
+      // login() returns the /me/ payload which includes profile_complete
+      const me = await login(data.access, data.refresh);
+
+      if (me && !me.profile_complete) {
+        navigate("/complete-profile", { replace: true });
+      } else {
+        navigate(from, { replace: true });
+      }
+    } catch {
       setError("Network error. Is the backend running?");
     } finally {
       setLoading(false);
@@ -69,7 +73,6 @@ function Login() {
           <span>Sign in with Google</span>
         </button>
 
-        {/* TEST LOGIN — REMOVE IN PRODUCTION */}
         {import.meta.env.DEV && (
           <div className="flex flex-col items-center space-y-2 border-t border-white/20 pt-4 w-full">
             <p className="text-yellow-400 text-xs">⚠️ Dev Mode Only</p>
@@ -77,8 +80,8 @@ function Login() {
               type="email"
               placeholder="test@ceu.edu.ph"
               value={testEmail}
-              onChange={(e) => setTestEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleTestLogin()}
+              onChange={e => setTestEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleTestLogin()}
               className="p-2 rounded-lg text-black text-sm w-full text-center"
             />
             {error && <p className="text-red-400 text-xs">{error}</p>}

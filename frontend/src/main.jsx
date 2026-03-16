@@ -7,6 +7,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import App from "./App.jsx";
 import Home from "./Home.jsx";
 import Login from "./pages/auth/Login.jsx";
+import CompleteProfile from "./pages/general/CompleteProfile";
 import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
@@ -18,6 +19,7 @@ createRoot(document.getElementById("root")).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/complete-profile" element={<CompleteProfile />} />
           <Route
             path="/home"
             element={
