@@ -42,17 +42,17 @@ class CEUAccountAdapter(DefaultSocialAccountAdapter):
         """Create or update the UserIdentity row for this social account."""
         from users.models import UserIdentity
 
-        account   = sociallogin.account
-        extra     = account.extra_data
-        sub       = str(account.uid)          # Google's unique user ID
-        provider  = account.provider          # "google"
+        account = sociallogin.account
+        extra = account.extra_data
+        sub = str(account.uid)  # Google's unique user ID
+        provider = account.provider  # "google"
 
         UserIdentity.objects.update_or_create(
             provider=provider,
             provider_sub=sub,
             defaults={
-                "user":           user,
+                "user": user,
                 "provider_email": extra.get("email", ""),
-                "raw_profile":    extra,
+                "raw_profile": extra,
             },
         )

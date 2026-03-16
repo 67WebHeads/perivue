@@ -38,11 +38,11 @@ class TestLoginView(APIView):
 
         return Response(
             {
-                "access":    str(refresh.access_token),
-                "refresh":   str(refresh),
-                "email":     user.email,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "email": user.email,
                 "full_name": user.full_name,
-                "created":   created,
+                "created": created,
             }
         )
 
@@ -76,8 +76,8 @@ class MeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user.full_name        = full_name
-        user.role             = role
+        user.full_name = full_name
+        user.role = role
         user.profile_complete = True
         user.save(update_fields=["full_name", "role", "profile_complete", "updated_at"])
 
@@ -86,14 +86,14 @@ class MeView(APIView):
     @staticmethod
     def _serialize(user):
         return {
-            "id":               str(user.pk),
-            "email":            user.email,
-            "full_name":        user.full_name,
-            "avatar_url":       user.avatar_url,
-            "role":             user.role,
+            "id": str(user.pk),
+            "email": user.email,
+            "full_name": user.full_name,
+            "avatar_url": user.avatar_url,
+            "role": user.role,
             "profile_complete": user.profile_complete,
-            "is_staff":         user.is_staff,
-            "created_at":       user.created_at,
+            "is_staff": user.is_staff,
+            "created_at": user.created_at,
         }
 
 
@@ -108,8 +108,7 @@ class StaffListView(APIView):
 
     def get(self, request):
         staff = (
-            User.objects
-            .filter(role__in=["admin", "clinician"], is_active=True)
+            User.objects.filter(role__in=["admin", "clinician"], is_active=True)
             .order_by("full_name")
             .values("id", "full_name", "email", "role")
         )

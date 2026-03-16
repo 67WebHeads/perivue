@@ -85,13 +85,19 @@ class PatientDetailView(APIView):
     def get(self, request, pk):
         clinic_id = get_clinic_id(request)
         if not clinic_id:
-            return Response({"error": "X-Clinic-ID header is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "X-Clinic-ID header is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(PatientDetailSerializer(self._get_patient(pk, clinic_id)).data)
 
     def patch(self, request, pk):
         clinic_id = get_clinic_id(request)
         if not clinic_id:
-            return Response({"error": "X-Clinic-ID header is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "X-Clinic-ID header is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         patient = self._get_patient(pk, clinic_id)
         serializer = PatientUpdateSerializer(patient, data=request.data, partial=True)
         if serializer.is_valid():
@@ -101,6 +107,9 @@ class PatientDetailView(APIView):
     def delete(self, request, pk):
         clinic_id = get_clinic_id(request)
         if not clinic_id:
-            return Response({"error": "X-Clinic-ID header is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "X-Clinic-ID header is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         self._get_patient(pk, clinic_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

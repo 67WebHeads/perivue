@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import Patient
 
-
 PATIENT_WRITE_FIELDS = [
     "patient_code",
     "first_name",
@@ -14,11 +13,15 @@ PATIENT_WRITE_FIELDS = [
     "notes",
 ]
 
-PATIENT_READ_FIELDS = [
-    "id",
-    "clinic_id",
-    "full_name",
-] + PATIENT_WRITE_FIELDS + ["created_at", "updated_at"]
+PATIENT_READ_FIELDS = (
+    [
+        "id",
+        "clinic_id",
+        "full_name",
+    ]
+    + PATIENT_WRITE_FIELDS
+    + ["created_at", "updated_at"]
+)
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -49,7 +52,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
 
     class Meta:
-        model  = Patient
+        model = Patient
         fields = PATIENT_READ_FIELDS
         read_only_fields = ["id", "clinic_id", "full_name", "created_at", "updated_at"]
 
@@ -59,7 +62,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
 
 class PatientCreateSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = Patient
+        model = Patient
         fields = PATIENT_WRITE_FIELDS
 
     def validate_patient_code(self, value):
@@ -83,7 +86,7 @@ class PatientCreateSerializer(serializers.ModelSerializer):
 
 class PatientUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = Patient
+        model = Patient
         fields = PATIENT_WRITE_FIELDS
 
     def validate_patient_code(self, value):
