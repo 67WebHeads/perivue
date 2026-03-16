@@ -92,6 +92,7 @@ export function AuthProvider({ children }) {
     saveTokens(access, refresh);
     const me = await fetchMe();
     setUser(me);
+    return me;
   }, [fetchMe]);
 
   // ─── Logout ──────────────────────────────────────────────────────────────────

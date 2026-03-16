@@ -36,6 +36,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     full_name = models.CharField(max_length=255, blank=True, null=True)
     avatar_url = models.CharField(max_length=500, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="viewer")
+    profile_complete = models.BooleanField(
+        default=False
+    )  # ← flipped to True after profile setup
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -65,6 +68,9 @@ class UserIdentity(models.Model):
     provider_email = models.CharField(max_length=255, blank=True, null=True)
     raw_profile = models.JSONField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("provider", "provider_sub")]
 
     def __str__(self):
         return f"{self.provider} - {self.provider_email}"
