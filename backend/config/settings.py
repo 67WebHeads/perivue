@@ -134,9 +134,9 @@ SIMPLE_JWT = {
 
 # Tell dj-rest-auth to use JWTs instead of standard tokens
 REST_AUTH = {
-    'USE_JWT': True,
-    'JWT_AUTH_COOKIE': 'my-app-auth',
-    'JWT_AUTH_REFRESH_COOKIE': 'my-refresh-token',
+    "USE_JWT": True,
+    "JWT_AUTH_COOKIE": "my-app-auth",
+    "JWT_AUTH_REFRESH_COOKIE": "my-refresh-token",
 }
 
 # CORS
@@ -162,8 +162,8 @@ AUTHENTICATION_BACKENDS = [
 # Allauth
 SITE_ID = 1
 ACCOUNT_EMAIL_VERIFICATION = "none"
-ACCOUNT_LOGIN_METHODS = {'email'}
-ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 
 # This line is CRITICAL because your custom user model doesn't have a username!
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
