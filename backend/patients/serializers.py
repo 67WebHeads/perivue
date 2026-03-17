@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import Patient
 
-
 PATIENT_WRITE_FIELDS = [
     "patient_code",
     "first_name",
@@ -21,7 +20,7 @@ class PatientListSerializer(serializers.ModelSerializer):
     """Lightweight — used for the table list view."""
 
     full_name = serializers.SerializerMethodField()
-    age       = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -55,7 +54,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     """Full detail — used for retrieve / expanded view."""
 
     full_name = serializers.SerializerMethodField()
-    age       = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -78,7 +77,14 @@ class PatientDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "clinic_id", "full_name", "age", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "clinic_id",
+            "full_name",
+            "age",
+            "created_at",
+            "updated_at",
+        ]
 
     def get_full_name(self, obj):
         return obj.full_name
@@ -89,7 +95,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
 
 class PatientCreateSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = Patient
+        model = Patient
         fields = PATIENT_WRITE_FIELDS
 
     def validate_patient_code(self, value):
@@ -113,7 +119,7 @@ class PatientCreateSerializer(serializers.ModelSerializer):
 
 class PatientUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = Patient
+        model = Patient
         fields = PATIENT_WRITE_FIELDS
 
     def validate_patient_code(self, value):
