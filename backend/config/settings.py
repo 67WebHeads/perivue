@@ -186,3 +186,15 @@ SOCIALACCOUNT_ADAPTER = "users.adapters.CEUAccountAdapter"
 # Redirects
 LOGIN_REDIRECT_URL = "http://localhost:5173/home"
 ACCOUNT_LOGOUT_REDIRECT_URL = "http://localhost:5173/login"
+
+# Email Backend Configuration
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 465))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# Use SSL for Gmail (Bypasses most basic network blocks)
+EMAIL_USE_TLS = False
+EMAIL_USE_SSL = True
