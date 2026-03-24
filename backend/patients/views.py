@@ -1,4 +1,3 @@
-import uuid
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
@@ -15,28 +14,11 @@ from .serializers import (
 )
 
 
-def get_clinic_id(request):
-    raw = request.headers.get("X-Clinic-ID") or request.query_params.get("clinic_id")
-    if not raw:
-        return None
-    try:
-        return uuid.UUID(str(raw))
-    except ValueError:
-        return None
-
-
 class PatientListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        clinic_id = get_clinic_id(request)
-        if not clinic_id:
-            return Response(
-                {"error": "X-Clinic-ID header is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        patients = Patient.objects.filter(clinic_id=clinic_id)
+        patients = Patient.objects.all()
 
         search = request.query_params.get("search", "").strip()
         if search:
@@ -56,16 +38,9 @@ class PatientListCreateView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        clinic_id = get_clinic_id(request)
-        if not clinic_id:
-            return Response(
-                {"error": "X-Clinic-ID header is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = PatientCreateSerializer(
             data=request.data,
-            context={"clinic_id": clinic_id, "request": request},
+            context={"request": request},
         )
         if serializer.is_valid():
             patient = serializer.save()
@@ -79,37 +54,17 @@ class PatientListCreateView(APIView):
 class PatientDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def _get_patient(self, pk, clinic_id):
-        return get_object_or_404(Patient, pk=pk, clinic_id=clinic_id)
-
     def get(self, request, pk):
-        clinic_id = get_clinic_id(request)
-        if not clinic_id:
-            return Response(
-                {"error": "X-Clinic-ID header is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        return Response(PatientDetailSerializer(self._get_patient(pk, clinic_id)).data)
+        patient = get_object_or_404(Patient, pk=pk)
+        return Response(PatientDetailSerializer(patient).data)
 
     def patch(self, request, pk):
-        clinic_id = get_clinic_id(request)
-        if not clinic_id:
-            return Response(
-                {"error": "X-Clinic-ID header is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        patient = self._get_patient(pk, clinic_id)
+        patient = get_object_or_404(Patient, pk=pk)
         serializer = PatientUpdateSerializer(patient, data=request.data, partial=True)
         if serializer.is_valid():
             return Response(PatientDetailSerializer(serializer.save()).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        clinic_id = get_clinic_id(request)
-        if not clinic_id:
-            return Response(
-                {"error": "X-Clinic-ID header is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        self._get_patient(pk, clinic_id).delete()
+        get_object_or_404(Patient, pk=pk).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
