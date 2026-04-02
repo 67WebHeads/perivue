@@ -49,7 +49,7 @@ The MediaPipe script runs as a **separate Python process** alongside Django. It 
 | Styling        | Tailwind CSS 4.1 + DaisyUI 5.5 + MUI v7 (Emotion)         |
 | State          | React Context API (AuthContext)                             |
 | Backend        | Django 6.0, Django REST Framework 3.16                      |
-| Database       | PostgreSQL (SQLite fallback for dev)                        |
+| Database       | PostgreSQL on Supabase (session pooler)                     |
 | Auth           | JWT (SimpleJWT) + Google OAuth (django-allauth, CEU domain) |
 | Eye Tracking   | MediaPipe (Python, runs as a separate process)              |
 | Email          | Gmail SMTP via django.core.mail                             |
@@ -349,6 +349,8 @@ The test canvas is a **black fullscreen polar grid** displayed on the projector:
 ## Environment Variables
 
 **Backend (.env):** SECRET_KEY, DEBUG, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, GOOGLE_CLIENT_ID, GOOGLE_SECRET, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD
+
+**Note:** Database is hosted on Supabase using session pooler (`aws-1-ap-southeast-2.pooler.supabase.com:5432`). The direct host (`db.mdwydskkgjyiehlrjnvc.supabase.co`) has DNS issues — use the pooler connection.
 
 **Frontend (.env):** VITE_API_URL (default: http://localhost:8000)
 
