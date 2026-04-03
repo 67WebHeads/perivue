@@ -1,23 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import Dashboard from "../pages/general/Dashboard";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import background from "../assets/PeriVue_Background.webp";
 import splash_art_perivue from "../assets/splash_art_perivue.png";
 import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
 import GroupIcon from "@mui/icons-material/Group";
-import AddIcon from "@mui/icons-material/Add";
-import Records from "../pages/general/Records";
+import LogoutIcon from "@mui/icons-material/Logout";
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
   const location = useLocation();
+  const navigate = useNavigate();
 
   const navItems = [
     { path: "/home", label: "Dashboard", icon: <SpaceDashboardIcon /> },
     { path: "/records", label: "Users", icon: <GroupIcon /> },
-    { path: "/settings", label: "Settings", icon: "" },
   ];
 
   useEffect(() => {
@@ -64,9 +62,9 @@ function Layout() {
         </div>
 
         {/* Body */}
-        <div className="flex flex-1 relative">
+        <div className="flex flex-1 overflow-hidden relative">
           {isMobile && isOpen && (
-            <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setIsOpen(false)} />
+            <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsOpen(false)} />
           )}
 
           {/* Sidebar */}
@@ -76,7 +74,9 @@ function Layout() {
               h-full border-r border-white/10
               transition-all duration-300 ease-in-out flex flex-col
               ${isMobile
-                ? isOpen ? "translate-x-0 w-64 shadow-2xl bg-[#0d1325]/80 backdrop-blur-xl" : "-translate-x-full w-64"
+                ? isOpen
+                  ? "translate-x-0 w-64 shadow-2xl bg-[#0d1325]/80 backdrop-blur-xl"
+                  : "-translate-x-full w-64"
                 : isOpen ? "w-64" : "w-20"
               }
             `}
@@ -98,8 +98,12 @@ function Layout() {
                           }
                         `}
                       >
-                        <span className="text-xl">{item.icon}</span>
-                        <span className={`whitespace-nowrap transition-all duration-300 ${isOpen ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-4 absolute"}`}>
+                        <span className="text-xl flex-shrink-0">{item.icon}</span>
+                        <span
+                          className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${
+                            isOpen ? "opacity-100 max-w-xs" : "opacity-0 max-w-0"
+                          }`}
+                        >
                           {item.label}
                         </span>
                       </Link>
@@ -108,39 +112,32 @@ function Layout() {
                 })}
               </ul>
             </nav>
+
+            {/* Logout */}
             <div className="p-4 border-t border-white/10">
-              <button className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-red-500/20 text-white/80 hover:text-white transition-all duration-200">
-                <span className={`whitespace-nowrap transition-all duration-300 ${isOpen ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-4 absolute"}`}>
+              <button
+                onClick={() => navigate("/login")}
+                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-red-500/20 text-white/80 hover:text-white transition-all duration-200"
+              >
+                <span className="text-xl flex-shrink-0">
+                  <LogoutIcon fontSize="small" />
+                </span>
+                <span
+                  className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${
+                    isOpen ? "opacity-100 max-w-xs" : "opacity-0 max-w-0"
+                  }`}
+                >
                   Logout
                 </span>
               </button>
             </div>
           </aside>
+
+          {/* Outlet renders the matched child route here */}
           <main className="flex-1 overflow-y-auto relative">
             <div className="h-full m-2 bg-white/5 border border-white/10 rounded-2xl overflow-x-hidden p-4">
-              <Outlet/>
+              <Outlet />
             </div>
-            {/* {!isMobile && (
-              <button
-                onMouseEnter={() => setIsHovering(true)}
-                onMouseLeave={() => setIsHovering(false)}
-                className={`
-                  absolute bottom-8 right-8
-                  flex items-center gap-2 p-4 rounded-full
-                  bg-white/20 hover:bg-white/30
-                  border border-white/30 hover:border-white/50
-                  text-white text-sm font-medium
-                  backdrop-blur-sm
-                  shadow-lg hover:shadow-xl
-                  transition-all duration-200
-                  hover:scale-105 active:scale-95 hover:cursor-pointer
-                  
-                `}
-              >
-                <AddIcon fontSize="small" />
-                
-              </button>
-            )} */}
           </main>
         </div>
 
