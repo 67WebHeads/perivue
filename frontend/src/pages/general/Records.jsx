@@ -264,7 +264,7 @@ export default function Records() {
         />
         <button
           onClick={() => setShowNewTest(true)}
-          className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/20 border border-blue-500/25 text-blue-400 hover:bg-blue-500/30 hover:border-blue-500/40 transition-all hover:cursor-pointer"
+          className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium bg-purple-500/20 border border-purple-500/25 text-white hover:bg-purple-500/30 hover:border-purple-500/40 transition-all hover:cursor-pointer"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="6" y1="1" x2="6" y2="11" /><line x1="1" y1="6" x2="11" y2="6" />
@@ -594,7 +594,7 @@ export default function Records() {
               Cancel
             </button>
             <button onClick={handleBeginTest} disabled={submitting}
-              className="px-5 py-2 rounded-lg text-sm font-medium bg-blue-500/20 border border-blue-500/25 text-blue-400 hover:bg-blue-500/30 transition-all disabled:opacity-50">
+              className="px-5 py-2 rounded-lg text-sm font-medium bg-purple-500/20 border border-purple-500/25 text-white hover:bg-purple-500/30 transition-all disabled:opacity-50">
               {submitting ? "Saving…" : "Save patient →"}
             </button>
           </div>

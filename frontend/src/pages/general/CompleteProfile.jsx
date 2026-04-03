@@ -59,7 +59,7 @@ export default function CompleteProfile() {
       const refresh = localStorage.getItem("refresh_token");
       await login(access, refresh);
 
-      navigate("/home", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch {
       setError("Network error. Please try again.");
     } finally {

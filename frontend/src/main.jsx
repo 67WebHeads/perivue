@@ -10,6 +10,8 @@ import CompleteProfile from "./pages/general/CompleteProfile";
 import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
+import TestHome from "./pages/general/TestHome.jsx";
+import TestScreen from './pages/general/TestScreen.jsx';
 
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
@@ -27,9 +29,13 @@ createRoot(document.getElementById("root")).render(
               </ProtectedRoute>
             }
           >
-            <Route path="/home" element={<Dashboard />} />
+            {/* <Route path="/home" element={<Dashboard />} /> */}
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/records" element={<Records />} />
+            <Route path="/test-menu" element={<TestHome/>} />
+          </Route>
+          <Route>
+            <Route path="/test" element={<TestScreen/>} />
           </Route>
         </Routes>
       </AuthProvider>

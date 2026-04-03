@@ -5,6 +5,7 @@ import splash_art_perivue from "../assets/splash_art_perivue.png";
 import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
 import GroupIcon from "@mui/icons-material/Group";
 import LogoutIcon from "@mui/icons-material/Logout";
+import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
@@ -14,8 +15,9 @@ function Layout() {
   const navigate = useNavigate();
 
   const navItems = [
-    { path: "/home", label: "Dashboard", icon: <SpaceDashboardIcon /> },
+    { path: "/dashboard", label: "Dashboard", icon: <SpaceDashboardIcon /> },
     { path: "/records", label: "Users", icon: <GroupIcon /> },
+    { path: "/test-menu", label: "Test", icon: <TrackChangesIcon /> },
   ];
 
   useEffect(() => {
@@ -37,7 +39,6 @@ function Layout() {
     <div className="h-dvh bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url(${background})` }}>
       <div className="h-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden flex flex-col text-white">
 
-        {/* Header */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-white/10">
           <div className="flex items-center gap-4">
             <button
@@ -61,13 +62,11 @@ function Layout() {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex flex-1 overflow-hidden relative">
           {isMobile && isOpen && (
             <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsOpen(false)} />
           )}
 
-          {/* Sidebar */}
           <aside
             className={`
               ${isMobile ? "fixed z-50" : "relative"}
@@ -113,7 +112,6 @@ function Layout() {
               </ul>
             </nav>
 
-            {/* Logout */}
             <div className="p-4 border-t border-white/10">
               <button
                 onClick={() => navigate("/login")}
@@ -133,7 +131,6 @@ function Layout() {
             </div>
           </aside>
 
-          {/* Outlet renders the matched child route here */}
           <main className="flex-1 overflow-y-auto relative">
             <div className="h-full m-2 bg-white/5 border border-white/10 rounded-2xl overflow-x-hidden p-4">
               <Outlet />
