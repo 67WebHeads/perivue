@@ -1,16 +1,17 @@
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import App from "./App.jsx";
-import Home from "./Home.jsx";
 import Login from "./pages/auth/Login.jsx";
 import CompleteProfile from "./pages/general/CompleteProfile";
 import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
+import TestHome from "./pages/general/TestHome.jsx";
+import TestScreen from './pages/general/TestScreen.jsx';
 
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
@@ -20,17 +21,21 @@ createRoot(document.getElementById("root")).render(
           <Route path="/" element={<App />} />
           <Route path="/login" element={<Login />} />
           <Route path="/complete-profile" element={<CompleteProfile />} />
+
           <Route
-            path="/home"
             element={
               <ProtectedRoute>
-                <Home />
+                <Layout />
               </ProtectedRoute>
             }
-          />
-          <Route element={<Layout />}>
+          >
+            {/* <Route path="/home" element={<Dashboard />} /> */}
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/records" element={<Records />} />
+            <Route path="/test-menu" element={<TestHome/>} />
+          </Route>
+          <Route>
+            <Route path="/test" element={<TestScreen/>} />
           </Route>
         </Routes>
       </AuthProvider>

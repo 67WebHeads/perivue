@@ -14,7 +14,7 @@ function Login() {
   const navigate  = useNavigate();
   const location  = useLocation();
 
-  const from = location.state?.from?.pathname || "/home";
+  const from = location.state?.from?.pathname || "/dashboard";
 
   const handleGoogleLogin = () => {
     window.location.href = `${API_BASE_URL}/accounts/google/login/`;

@@ -184,7 +184,7 @@ SOCIALACCOUNT_PROVIDERS = {
 SOCIALACCOUNT_ADAPTER = "users.adapters.CEUAccountAdapter"
 
 # Redirects
-LOGIN_REDIRECT_URL = "http://localhost:5173/home"
+LOGIN_REDIRECT_URL = "http://localhost:5173/dashboard"
 ACCOUNT_LOGOUT_REDIRECT_URL = "http://localhost:5173/login"
 
 # Email Backend Configuration
