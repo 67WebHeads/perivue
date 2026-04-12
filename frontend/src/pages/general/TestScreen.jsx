@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link } from 'react-router-dom'
-import tangentScreen from "../../assets/tangent_screen.webp"
+import tangentScreen from "../../assets/tangent_screen_1.png"
 
 function TestOverlay({ toggleOverlay, setToggleOverlay }) {
   const handleStartTestClick = () => {
