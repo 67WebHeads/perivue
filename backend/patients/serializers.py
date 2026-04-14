@@ -2,7 +2,6 @@ from rest_framework import serializers
 from .models import Patient
 
 PATIENT_WRITE_FIELDS = [
-    "patient_code",
     "first_name",
     "last_name",
     "sex",
@@ -17,8 +16,6 @@ PATIENT_WRITE_FIELDS = [
 
 
 class PatientListSerializer(serializers.ModelSerializer):
-    """Lightweight — used for the table list view."""
-
     full_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
 
@@ -26,7 +23,6 @@ class PatientListSerializer(serializers.ModelSerializer):
         model = Patient
         fields = [
             "id",
-            "clinic_id",
             "patient_code",
             "first_name",
             "last_name",
@@ -51,8 +47,6 @@ class PatientListSerializer(serializers.ModelSerializer):
 
 
 class PatientDetailSerializer(serializers.ModelSerializer):
-    """Full detail — used for retrieve / expanded view."""
-
     full_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
 
@@ -60,7 +54,6 @@ class PatientDetailSerializer(serializers.ModelSerializer):
         model = Patient
         fields = [
             "id",
-            "clinic_id",
             "patient_code",
             "first_name",
             "last_name",
@@ -79,7 +72,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
-            "clinic_id",
+            "patient_code",
             "full_name",
             "age",
             "created_at",
@@ -98,38 +91,11 @@ class PatientCreateSerializer(serializers.ModelSerializer):
         model = Patient
         fields = PATIENT_WRITE_FIELDS
 
-    def validate_patient_code(self, value):
-        if not value:
-            return value
-        clinic_id = self.context.get("clinic_id")
-        qs = Patient.objects.filter(clinic_id=clinic_id, patient_code=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError(
-                "A patient with this code already exists in this clinic."
-            )
-        return value
-
     def create(self, validated_data):
-        return Patient.objects.create(
-            clinic_id=self.context["clinic_id"], **validated_data
-        )
+        return Patient.objects.create(**validated_data)
 
 
 class PatientUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
         fields = PATIENT_WRITE_FIELDS
-
-    def validate_patient_code(self, value):
-        if not value:
-            return value
-        qs = Patient.objects.filter(
-            clinic_id=self.instance.clinic_id, patient_code=value
-        ).exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError(
-                "A patient with this code already exists in this clinic."
-            )
-        return value

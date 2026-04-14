@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API_BASE_URL from '../../config/api';
 
-const CLINIC_ID = "00000000-0000-0000-0000-000000000001";
 
 const inputClass = `
   w-full px-3 py-2 rounded-lg text-sm
@@ -156,7 +155,7 @@ export default function Records() {
     try {
       const url = new URL(`${API_BASE_URL}/api/patients/`);
       if (q) url.searchParams.set("search", q);
-      const res = await authFetch(url.toString(), { headers: { "X-Clinic-ID": CLINIC_ID } });
+      const res = await authFetch(url.toString());
       if (!res.ok) throw new Error("Failed to fetch patients");
       setPatients(await res.json());
     } catch (err) {
@@ -181,7 +180,6 @@ export default function Records() {
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/`, {
         method: "POST",
-        headers: { "X-Clinic-ID": CLINIC_ID },
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error(JSON.stringify(await res.json()));
@@ -216,7 +214,6 @@ export default function Records() {
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/${selected.id}/`, {
         method: "PATCH",
-        headers: { "X-Clinic-ID": CLINIC_ID },
         body: JSON.stringify(editForm),
       });
       if (!res.ok) throw new Error(JSON.stringify(await res.json()));
@@ -237,7 +234,7 @@ export default function Records() {
     setDeleting(true);
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/${selected.id}/`, {
-        method: "DELETE", headers: { "X-Clinic-ID": CLINIC_ID },
+        method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete patient");
       setPatients(prev => prev.filter(p => p.id !== selected.id));

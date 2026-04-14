@@ -3,8 +3,6 @@ import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
 import { useNavigate } from "react-router-dom";
 
-const CLINIC_ID = "00000000-0000-0000-0000-000000000001";
-
 const TEST_TYPES = [
   { value: "gay test", label: "faggot 3.1", description: "gaywad" },
 ];
@@ -166,15 +164,13 @@ export default function TestHome() {
   const [patientId,   setPatientId]   = useState(null);
   const [testType,    setTestType]    = useState(null);
 
-  // useEffect(() => {
-  //   authFetch(`${API_BASE_URL}/api/patients/`, {
-  //     headers: { "X-Clinic-ID": CLINIC_ID },
-  //   })
-  //     .then(res => res.ok ? res.json() : [])
-  //     .then(data => setPatients(data))
-  //     .catch(() => setPatients([]))
-  //     .finally(() => setLoadingPx(false));
-  // }, [authFetch]);
+useEffect(() => {
+  authFetch(`${API_BASE_URL}/api/patients/`)
+    .then(res => res.ok ? res.json() : [])
+    .then(data => setPatients(data))
+    .catch(() => setPatients([]))
+    .finally(() => setLoadingPx(false));
+}, [authFetch]);
 
   const ready = patientId && testType;
 
