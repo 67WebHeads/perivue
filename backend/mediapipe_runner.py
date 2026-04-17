@@ -4,6 +4,7 @@ import requests
 import argparse
 import time
 import sys
+import threading
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Perivue eye tracking runner")
@@ -20,7 +21,9 @@ print(f"Camera index: {args.camera}")
 print("Press Ctrl+C to stop.\n")
 
 # ── MediaPipe setup ───────────────────────────────────────────────────────────
-mp_face_mesh = mp.solutions.face_mesh
+mp_face_mesh       = mp.solutions.face_mesh
+mp_drawing         = mp.solutions.drawing_utils
+mp_drawing_styles  = mp.solutions.drawing_styles
 
 # MediaPipe Face Mesh landmark indices
 # Left eye corners:  33 (inner), 133 (outer)
@@ -101,16 +104,20 @@ def is_fixating(landmarks, img_w, img_h):
     return h_ok and v_ok
 
 
-# ── POST to Django ─────────────────────────────────────────────────────────────
-def post_fixation(fixating: bool):
+# ── POST to Django (async so it never blocks the frame loop) ──────────────────
+def _post_fixation_worker(fixating: bool):
     try:
         requests.post(
             API_URL,
             json={"is_fixating": fixating},
-            timeout=0.5,
+            timeout=1,
         )
     except Exception as e:
         print(f"  [warn] Failed to POST fixation: {e}")
+
+
+def post_fixation(fixating: bool):
+    threading.Thread(target=_post_fixation_worker, args=(fixating,), daemon=True).start()
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -178,5 +185,33 @@ with mp_face_mesh.FaceMesh(
             last_posted    = currently_fixating
             last_post_time = now
 
+        # ── Draw overlay on preview window (lightweight: contours + irises only) ──
+        if results.multi_face_landmarks:
+            for face_landmarks in results.multi_face_landmarks:
+                mp_drawing.draw_landmarks(
+                    image=frame,
+                    landmark_list=face_landmarks,
+                    connections=mp_face_mesh.FACEMESH_CONTOURS,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style(),
+                )
+                mp_drawing.draw_landmarks(
+                    image=frame,
+                    landmark_list=face_landmarks,
+                    connections=mp_face_mesh.FACEMESH_IRISES,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_iris_connections_style(),
+                )
+
+        status_text  = "FIXATION: OK" if currently_fixating else "FIXATION: LOST"
+        status_color = (0, 255, 0) if currently_fixating else (0, 0, 255)
+        cv2.putText(frame, status_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_color, 2)
+        cv2.putText(frame, f"Run: {args.run_id[:8]}...", (20, img_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+        cv2.imshow("PeriVue Eye Tracker", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
 cap.release()
+cv2.destroyAllWindows()
 print("Eye tracker stopped.")
