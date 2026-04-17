@@ -3,8 +3,9 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link } from 'react-router-dom'
 import tangentScreen from "../../assets/tangent_screen_1.png"
+import TestSettings, { DEFAULT_SETTINGS } from './TestSettings'
 
-function TestOverlay({ toggleOverlay, setToggleOverlay }) {
+function TestOverlay({ toggleOverlay, setToggleOverlay, onOpenSettings }) {
   const handleStartTestClick = () => {
     setToggleOverlay(false)
   }
@@ -18,7 +19,10 @@ function TestOverlay({ toggleOverlay, setToggleOverlay }) {
               <ArrowBackIcon className="hover:text-gray-300 hover:cursor-pointer active:scale-95" />
             </Link>
 
-            <SettingsIcon className="hover:text-gray-300 hover:cursor-pointer active:scale-95" />
+            <SettingsIcon
+              className="hover:text-gray-300 hover:cursor-pointer active:scale-95"
+              onClick={onOpenSettings}
+            />
 
             <button
               type="button"
@@ -36,6 +40,8 @@ function TestOverlay({ toggleOverlay, setToggleOverlay }) {
 
 function TestScreen() {
   const [toggleOverlay, setToggleOverlay] = useState(true)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS)
 
   const handleDoubleClick = () => {
     setToggleOverlay(true)
@@ -43,15 +49,30 @@ function TestScreen() {
 
   return (
     <div
-      className="relative min-h-dvh bg-black bg-center bg-contain bg-no-repeat flex items-center justify-center"
+      className="relative min-h-dvh bg-black flex items-center justify-center"
       onDoubleClick={handleDoubleClick}
-      style={{backgroundImage:`url(${tangentScreen})`}}
     >
+      {/* Background image isolated so brightness filter doesn't bleed into overlay */}
+      <div
+        className="absolute inset-0 bg-center bg-contain bg-no-repeat"
+        style={{
+          backgroundImage: `url(${tangentScreen})`,
+          filter: `brightness(${settings.brightness / 100})`,
+        }}
+      />
       <TestOverlay
         toggleOverlay={toggleOverlay}
         setToggleOverlay={setToggleOverlay}
+        onOpenSettings={() => setShowSettings(true)}
       />
-      
+
+      {showSettings && (
+        <TestSettings
+          settings={settings}
+          onChange={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   )
 }
