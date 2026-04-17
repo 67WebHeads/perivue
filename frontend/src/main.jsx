@@ -35,7 +35,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="/test-menu" element={<TestHome/>} />
           </Route>
           <Route>
-            <Route path="/test" element={<TestScreen/>} />
+            <Route path="/test/canvas" element={<TestScreen />} />
           </Route>
         </Routes>
       </AuthProvider>
