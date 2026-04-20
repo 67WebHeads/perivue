@@ -13,7 +13,6 @@ from .models import (
     ProtocolPoint,
     TestSession,
     TestRun,
-    TrialResult,
     FixationEvent,
 )
 from .serializers import (
@@ -24,8 +23,6 @@ from .serializers import (
     TestSessionCreateSerializer,
     TestRunSerializer,
     TestRunStateSerializer,
-    TrialResultCreateSerializer,
-    TrialResultSerializer,
     FixationEventSerializer,
 )
 
@@ -265,44 +262,76 @@ class RunCommandView(APIView):
 # ─── Trial Results ─────────────────────────────────────────────────────────────
 
 
+VALID_RESULTS = {"seen", "not_seen", "not_tested"}
+
+
 class TrialResultCreateView(APIView):
     """
     The canvas POSTs here after each stimulus — seen or not seen.
-    Also advances current_point_index automatically.
+    Appends one entry to run.trials (denormalized with the protocol point metadata)
+    and auto-advances current_point_index.
     """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request, run_pk):
-        run = get_object_or_404(TestRun, pk=run_pk)
+        run = get_object_or_404(
+            TestRun.objects.select_related("session__protocol"), pk=run_pk
+        )
 
-        if run.status not in ("in_progress",):
+        if run.status != "in_progress":
             return Response(
                 {"error": "Run is not in progress."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = TrialResultCreateSerializer(
-            data=request.data,
-            context={"run": run},
-        )
-        if serializer.is_valid():
-            result = serializer.save()
+        point_id = request.data.get("protocol_point")
+        result_value = request.data.get("result")
 
-            # Advance to the next point automatically
-            total_points = run.session.protocol.points.count()
-            if run.current_point_index + 1 >= total_points:
-                run.status = "completed"
-                run.end_time = timezone.now()
-            else:
-                run.current_point_index += 1
-            run.save()
-
+        if result_value not in VALID_RESULTS:
             return Response(
-                TrialResultSerializer(result).data,
-                status=status.HTTP_201_CREATED,
+                {"error": f"result must be one of {sorted(VALID_RESULTS)}."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        point = get_object_or_404(
+            ProtocolPoint, pk=point_id, protocol=run.session.protocol
+        )
+
+        trial = {
+            "protocol_point_id": str(point.id),
+            "point_index": point.point_index,
+            "point_type": point.point_type,
+            "x_deg": str(point.x_deg) if point.x_deg is not None else None,
+            "y_deg": str(point.y_deg) if point.y_deg is not None else None,
+            "angle_deg": str(point.angle_deg) if point.angle_deg is not None else None,
+            "start_radius_deg": (
+                str(point.start_radius_deg)
+                if point.start_radius_deg is not None
+                else None
+            ),
+            "is_blindspot_check": point.is_blindspot_check,
+            "result": result_value,
+            "response_time_ms": request.data.get("response_time_ms"),
+            "boundary_x_deg": request.data.get("boundary_x_deg"),
+            "boundary_y_deg": request.data.get("boundary_y_deg"),
+            "presented_at": timezone.now().isoformat(),
+        }
+
+        trials = list(run.trials or [])
+        trials.append(trial)
+        run.trials = trials
+
+        # Advance to the next point automatically
+        total_points = run.session.protocol.points.count()
+        if run.current_point_index + 1 >= total_points:
+            run.status = "completed"
+            run.end_time = timezone.now()
+        else:
+            run.current_point_index += 1
+        run.save()
+
+        return Response(trial, status=status.HTTP_201_CREATED)
 
 
 class TrialResultListView(APIView):
@@ -314,8 +343,7 @@ class TrialResultListView(APIView):
 
     def get(self, request, run_pk):
         run = get_object_or_404(TestRun, pk=run_pk)
-        results = run.results.select_related("protocol_point").all()
-        return Response(TrialResultSerializer(results, many=True).data)
+        return Response(run.trials or [])
 
 
 # ─── Fixation ─────────────────────────────────────────────────────────────────

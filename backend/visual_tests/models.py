@@ -118,8 +118,9 @@ class TestRun(models.Model):
     start_time = models.DateTimeField(blank=True, null=True)
     end_time = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    gaze_x = models.FloatField(blank=True, null=True) 
+    gaze_x = models.FloatField(blank=True, null=True)
     gaze_y = models.FloatField(blank=True, null=True)
+    trials = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "test_runs"
@@ -127,39 +128,6 @@ class TestRun(models.Model):
 
     def __str__(self):
         return f"Run {self.id} — {self.eye} — {self.status}"
-
-
-class TrialResult(models.Model):
-    RESULT_CHOICES = [
-        ("seen", "Seen"),
-        ("not_seen", "Not Seen"),
-        ("not_tested", "Not Tested"),
-    ]
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    run = models.ForeignKey(TestRun, on_delete=models.CASCADE, related_name="results")
-    protocol_point = models.ForeignKey(
-        ProtocolPoint, on_delete=models.PROTECT, related_name="results"
-    )
-    result = models.CharField(max_length=12, choices=RESULT_CHOICES)
-    response_time_ms = models.PositiveIntegerField(blank=True, null=True)
-
-    # Kinetic only
-    boundary_x_deg = models.DecimalField(
-        max_digits=6, decimal_places=2, blank=True, null=True
-    )
-    boundary_y_deg = models.DecimalField(
-        max_digits=6, decimal_places=2, blank=True, null=True
-    )
-
-    presented_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "trial_results"
-        ordering = ["presented_at"]
-
-    def __str__(self):
-        return f"{self.run} — point {self.protocol_point.point_index} — {self.result}"
 
 
 class FixationEvent(models.Model):

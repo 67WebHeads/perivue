@@ -4,7 +4,6 @@ from .models import (
     ProtocolPoint,
     TestSession,
     TestRun,
-    TrialResult,
     FixationEvent,
 )
 
@@ -34,17 +33,6 @@ class TestSessionAdmin(admin.ModelAdmin):
 @admin.register(TestRun)
 class TestRunAdmin(admin.ModelAdmin):
     list_display = ["session", "eye", "status", "current_point_index", "created_at"]
-
-
-@admin.register(TrialResult)
-class TrialResultAdmin(admin.ModelAdmin):
-    list_display = [
-        "run",
-        "protocol_point",
-        "result",
-        "response_time_ms",
-        "presented_at",
-    ]
 
 
 @admin.register(FixationEvent)
