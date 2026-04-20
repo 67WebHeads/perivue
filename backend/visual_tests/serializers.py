@@ -4,7 +4,6 @@ from .models import (
     ProtocolPoint,
     TestSession,
     TestRun,
-    TrialResult,
     FixationEvent,
 )
 from patients.models import Patient
@@ -145,6 +144,7 @@ class TestRunSerializer(serializers.ModelSerializer):
             "start_time",
             "end_time",
             "created_at",
+            "trials",
         ]
 
 
@@ -181,59 +181,6 @@ class TestRunStateSerializer(serializers.ModelSerializer):
             "background_color": protocol.background_color,
             "kinetic_speed_deg_per_sec": str(protocol.kinetic_speed_deg_per_sec),
         }
-
-
-class TrialResultCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TrialResult
-        fields = [
-            "protocol_point",
-            "result",
-            "response_time_ms",
-            "boundary_x_deg",
-            "boundary_y_deg",
-        ]
-
-    def create(self, validated_data):
-        run = self.context["run"]
-        return TrialResult.objects.create(run=run, **validated_data)
-
-
-class TrialResultSerializer(serializers.ModelSerializer):
-    point_index = serializers.IntegerField(
-        source="protocol_point.point_index", read_only=True
-    )
-    point_type = serializers.CharField(
-        source="protocol_point.point_type", read_only=True
-    )
-    x_deg = serializers.DecimalField(
-        source="protocol_point.x_deg", max_digits=6, decimal_places=2, read_only=True
-    )
-    y_deg = serializers.DecimalField(
-        source="protocol_point.y_deg", max_digits=6, decimal_places=2, read_only=True
-    )
-    angle_deg = serializers.DecimalField(
-        source="protocol_point.angle_deg",
-        max_digits=6,
-        decimal_places=2,
-        read_only=True,
-    )
-
-    class Meta:
-        model = TrialResult
-        fields = [
-            "id",
-            "point_index",
-            "point_type",
-            "x_deg",
-            "y_deg",
-            "angle_deg",
-            "result",
-            "response_time_ms",
-            "boundary_x_deg",
-            "boundary_y_deg",
-            "presented_at",
-        ]
 
 
 class FixationEventSerializer(serializers.ModelSerializer):
