@@ -4,6 +4,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+import subprocess
+import sys
+import os
 
 from .models import (
     TestProtocol,
@@ -25,6 +28,67 @@ from .serializers import (
     TrialResultSerializer,
     FixationEventSerializer,
 )
+
+_mediapipe_process = None
+
+class MediaPipeStartView(APIView):
+    """
+    Launches the mediapipe_runner.py script for a given run.
+    Called by the frontend when a test starts.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, run_pk):
+        global _mediapipe_process
+
+        run = get_object_or_404(TestRun, pk=run_pk)
+
+        # Kill any existing MediaPipe process
+        if _mediapipe_process and _mediapipe_process.poll() is None:
+            _mediapipe_process.terminate()
+            _mediapipe_process = None
+
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'mediapipe_runner.py'
+        )
+
+        if not os.path.exists(script_path):
+            return Response(
+                {"error": "mediapipe_runner.py not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            _mediapipe_process = subprocess.Popen(
+                [sys.executable, script_path, '--run_id', str(run.id)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            return Response({"ok": True, "pid": _mediapipe_process.pid})
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class MediaPipeStopView(APIView):
+    """
+    Stops the running MediaPipe process.
+    Called when the test ends or is aborted.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, run_pk):
+        global _mediapipe_process
+
+        if _mediapipe_process and _mediapipe_process.poll() is None:
+            _mediapipe_process.terminate()
+            _mediapipe_process = None
+            return Response({"ok": True, "stopped": True})
+
+        return Response({"ok": True, "stopped": False})
 
 # ─── Protocols ────────────────────────────────────────────────────────────────
 
@@ -258,16 +322,13 @@ class TrialResultListView(APIView):
 
 
 class FixationStatusView(APIView):
-    """
-    MediaPipe script POSTs here every ~200ms with current fixation status.
-    No auth required — this comes from a local Python process, not the browser.
-    """
-
     permission_classes = [AllowAny]
 
     def post(self, request, run_pk):
         run = get_object_or_404(TestRun, pk=run_pk)
         is_fixating = request.data.get("is_fixating")
+        gaze_x      = request.data.get("gaze_x")
+        gaze_y      = request.data.get("gaze_y")
 
         if is_fixating is None:
             return Response(
@@ -275,13 +336,17 @@ class FixationStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Update live fixation status on the run
         run.is_fixating = is_fixating
         if not is_fixating:
             run.fixation_loss_count += 1
-        run.save(update_fields=["is_fixating", "fixation_loss_count"])
 
-        # Log the event
+        # Store latest gaze position
+        if gaze_x is not None:
+            run.gaze_x = gaze_x
+        if gaze_y is not None:
+            run.gaze_y = gaze_y
+
+        run.save(update_fields=["is_fixating", "fixation_loss_count", "gaze_x", "gaze_y"])
+
         FixationEvent.objects.create(run=run, is_fixating=is_fixating)
-
         return Response({"ok": True})

@@ -220,8 +220,19 @@ export default function TestHome() {
       if (!runRes.ok) throw new Error("Failed to create run");
       const run = await runRes.json();
 
-      // Step 3 — open canvas in new tab with run_id in URL
-      window.open(`/test/canvas?run_id=${run.id}`, "_blank");
+      // Step 3 — launch MediaPipe
+      try {
+        await authFetch(
+          `${API_BASE_URL}/api/visual-tests/runs/${run.id}/mediapipe/start/`,
+          { method: 'POST' }
+        )
+      } catch {
+        // Non-fatal — test can continue without eye tracking
+        console.warn('MediaPipe could not be started')
+      }
+
+      // Step 4 — open canvas
+      window.open(`/test/canvas?run_id=${run.id}`, '_blank')
 
     } catch (err) {
       setError(err.message);
