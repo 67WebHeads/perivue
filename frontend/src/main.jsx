@@ -11,7 +11,8 @@ import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
 import TestHome from "./pages/general/TestHome.jsx";
-import TestScreen from './pages/general/TestScreen.jsx';
+import TestScreen from './pages/general/TestScreen.jsx'
+import TestResults from './pages/general/TestResults.jsx';
 
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
@@ -36,6 +37,7 @@ createRoot(document.getElementById("root")).render(
           </Route>
           <Route>
             <Route path="/test/canvas" element={<TestScreen />} />
+          <Route path="/test/results" element={<TestResults />} />
           </Route>
         </Routes>
       </AuthProvider>
