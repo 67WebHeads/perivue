@@ -149,13 +149,8 @@ class TestRunSerializer(serializers.ModelSerializer):
 
 
 class TestRunStateSerializer(serializers.ModelSerializer):
-    """
-    Lightweight serializer the canvas polls to know the current test state.
-    Includes the current point's full data so the canvas knows what to display.
-    """
-
     current_point = serializers.SerializerMethodField()
-    protocol = serializers.SerializerMethodField()
+    protocol      = serializers.SerializerMethodField()
 
     class Meta:
         model = TestRun
@@ -165,6 +160,8 @@ class TestRunStateSerializer(serializers.ModelSerializer):
             "current_point_index",
             "is_fixating",
             "fixation_loss_count",
+            "gaze_x",        # ← add
+            "gaze_y",        # ← add
             "current_point",
             "protocol",
         ]

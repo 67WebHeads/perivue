@@ -118,6 +118,8 @@ class TestRun(models.Model):
     start_time = models.DateTimeField(blank=True, null=True)
     end_time = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    gaze_x = models.FloatField(blank=True, null=True) 
+    gaze_y = models.FloatField(blank=True, null=True)
 
     class Meta:
         db_table = "test_runs"
