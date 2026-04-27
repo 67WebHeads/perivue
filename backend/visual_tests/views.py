@@ -28,11 +28,13 @@ from .serializers import (
 
 _mediapipe_process = None
 
+
 class MediaPipeStartView(APIView):
     """
     Launches the mediapipe_runner.py script for a given run.
     Called by the frontend when a test starts.
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, run_pk):
@@ -47,26 +49,25 @@ class MediaPipeStartView(APIView):
 
         script_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'mediapipe_runner.py'
+            "mediapipe_runner.py",
         )
 
         if not os.path.exists(script_path):
             return Response(
                 {"error": "mediapipe_runner.py not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
             _mediapipe_process = subprocess.Popen(
-                [sys.executable, script_path, '--run_id', str(run.id)],
+                [sys.executable, script_path, "--run_id", str(run.id)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             return Response({"ok": True, "pid": _mediapipe_process.pid})
         except Exception as e:
             return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
@@ -75,6 +76,7 @@ class MediaPipeStopView(APIView):
     Stops the running MediaPipe process.
     Called when the test ends or is aborted.
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, run_pk):
@@ -86,6 +88,7 @@ class MediaPipeStopView(APIView):
             return Response({"ok": True, "stopped": True})
 
         return Response({"ok": True, "stopped": False})
+
 
 # ─── Protocols ────────────────────────────────────────────────────────────────
 
@@ -355,8 +358,8 @@ class FixationStatusView(APIView):
     def post(self, request, run_pk):
         run = get_object_or_404(TestRun, pk=run_pk)
         is_fixating = request.data.get("is_fixating")
-        gaze_x      = request.data.get("gaze_x")
-        gaze_y      = request.data.get("gaze_y")
+        gaze_x = request.data.get("gaze_x")
+        gaze_y = request.data.get("gaze_y")
 
         if is_fixating is None:
             return Response(
@@ -374,7 +377,146 @@ class FixationStatusView(APIView):
         if gaze_y is not None:
             run.gaze_y = gaze_y
 
-        run.save(update_fields=["is_fixating", "fixation_loss_count", "gaze_x", "gaze_y"])
+        run.save(
+            update_fields=["is_fixating", "fixation_loss_count", "gaze_x", "gaze_y"]
+        )
 
         FixationEvent.objects.create(run=run, is_fixating=is_fixating)
         return Response({"ok": True})
+
+
+class SessionResultsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        session = get_object_or_404(
+            TestSession.objects.select_related("patient", "protocol", "performed_by"),
+            pk=pk,
+        )
+        runs = session.runs.all()
+
+        runs_data = []
+        for run in runs:
+            trials = run.trials or []
+
+            static_trials = [t for t in trials if t.get("point_type") == "static"]
+            kinetic_trials = [t for t in trials if t.get("point_type") == "kinetic"]
+
+            seen_static = [t for t in static_trials if t.get("result") == "seen"]
+            seen_kinetic = [t for t in kinetic_trials if t.get("result") == "seen"]
+
+            reaction_times = [
+                t["response_time_ms"]
+                for t in seen_static
+                if t.get("response_time_ms") is not None
+            ]
+            avg_reaction_time = (
+                round(sum(reaction_times) / len(reaction_times))
+                if reaction_times
+                else None
+            )
+
+            detection_accuracy = (
+                round((len(seen_static) / len(static_trials)) * 100, 1)
+                if static_trials
+                else 0
+            )
+
+            kinetic_completion = (
+                round((len(seen_kinetic) / len(kinetic_trials)) * 100, 1)
+                if kinetic_trials
+                else 0
+            )
+
+            total_points = len(trials)
+            reliability = (
+                round(
+                    max(
+                        0, (total_points - run.fixation_loss_count) / total_points * 100
+                    ),
+                    1,
+                )
+                if total_points > 0
+                else 100
+            )
+
+            runs_data.append(
+                {
+                    "id": str(run.id),
+                    "eye": run.eye,
+                    "status": run.status,
+                    "start_time": run.start_time,
+                    "end_time": run.end_time,
+                    "fixation_loss_count": run.fixation_loss_count,
+                    "metrics": {
+                        "detection_accuracy": detection_accuracy,
+                        "avg_reaction_time": avg_reaction_time,
+                        "stimuli_seen": len(seen_static),
+                        "stimuli_total": len(static_trials),
+                        "kinetic_boundary_points": len(seen_kinetic),
+                        "kinetic_total": len(kinetic_trials),
+                        "reliability": reliability,
+                    },
+                    "static_results": [
+                        {
+                            "x_deg": (
+                                float(t["x_deg"])
+                                if t.get("x_deg") is not None
+                                else None
+                            ),
+                            "y_deg": (
+                                float(t["y_deg"])
+                                if t.get("y_deg") is not None
+                                else None
+                            ),
+                            "result": t.get("result"),
+                        }
+                        for t in static_trials
+                    ],
+                    "kinetic_results": [
+                        {
+                            "angle_deg": (
+                                float(t["angle_deg"])
+                                if t.get("angle_deg") is not None
+                                else None
+                            ),
+                            "boundary_x": (
+                                float(t["boundary_x_deg"])
+                                if t.get("boundary_x_deg") is not None
+                                else None
+                            ),
+                            "boundary_y": (
+                                float(t["boundary_y_deg"])
+                                if t.get("boundary_y_deg") is not None
+                                else None
+                            ),
+                            "result": t.get("result"),
+                        }
+                        for t in kinetic_trials
+                    ],
+                }
+            )
+
+        return Response(
+            {
+                "session": {
+                    "id": str(session.id),
+                    "session_datetime": session.session_datetime,
+                    "eye": session.eye,
+                    "notes": session.notes,
+                    "protocol_name": session.protocol.name,
+                    "performed_by": (
+                        session.performed_by.full_name if session.performed_by else None
+                    ),
+                },
+                "patient": {
+                    "id": str(session.patient.id),
+                    "full_name": session.patient.full_name,
+                    "patient_code": session.patient.patient_code,
+                    "age": session.patient.age,
+                    "sex": session.patient.sex,
+                    "assigned_doctor": session.patient.assigned_doctor,
+                },
+                "runs": runs_data,
+            }
+        )

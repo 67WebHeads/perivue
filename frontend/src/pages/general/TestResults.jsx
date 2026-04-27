@@ -1,93 +1,9 @@
-import React, { useState } from 'react'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import PersonIcon from '@mui/icons-material/Person'
-import VisibilityIcon from '@mui/icons-material/Visibility'
-import AssessmentIcon from '@mui/icons-material/Assessment'
-import LightbulbIcon from '@mui/icons-material/Lightbulb'
-import { Link } from 'react-router-dom'
-import bg from '../../assets/PeriVue_Background.webp'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
+import API_BASE_URL from '../../config/api'
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const MOCK_PATIENT = {
-  name: 'Jeffrey Pascual',
-  patientCode: 'PV-20260420-0012',
-  age: 54,
-  sex: 'Everyday',
-  assignedDoctor: 'Dr. Reyes',
-  testDate: 'April 20, 2026',
-  protocol: 'Default Tangent Screen',
-}
-
-const MOCK_METRICS = {
-  OD: {
-    detectionAccuracy: 87.5,
-    sensitivity: 83.3,
-    avgReactionTime: 412,
-    stimuliSeen: 21,
-    stimuliTotal: 24,
-    kineticBoundaryPoints: 14,
-    kineticTotal: 16,
-    reliability: 91,
-    fixationLosses: 2,
-  },
-  OS: {
-    detectionAccuracy: 75.0,
-    sensitivity: 70.8,
-    avgReactionTime: 538,
-    stimuliSeen: 18,
-    stimuliTotal: 24,
-    kineticBoundaryPoints: 11,
-    kineticTotal: 16,
-    reliability: 78,
-    fixationLosses: 5,
-  },
-}
-
-const MOCK_INTERPRETATION = {
-  OD: {
-    summary: 'Within normal limits',
-    detail:
-      'Right eye visual field shows mostly intact peripheral vision with minor nasal depression. Detection accuracy is within the expected clinical range for this age group.',
-    flag: 'normal',
-  },
-  OS: {
-    summary: 'Mild peripheral field loss detected',
-    detail:
-      'Left eye shows reduced detection in the superior-temporal quadrant (45°–135°). Reaction times are elevated compared to the right eye. Recommend follow-up Humphrey perimetry for threshold confirmation.',
-    flag: 'warning',
-  },
-}
-
-// ─── Static polar grid points (mock seen/not-seen) ────────────────────────────
-
-const STATIC_POINTS = [
-  // angle, radius, seen
-  { a: 0,   r: 10, seen: true  }, { a: 0,   r: 20, seen: true  }, { a: 0,   r: 30, seen: true  },
-  { a: 45,  r: 10, seen: true  }, { a: 45,  r: 20, seen: true  }, { a: 45,  r: 30, seen: false },
-  { a: 90,  r: 10, seen: true  }, { a: 90,  r: 20, seen: false }, { a: 90,  r: 30, seen: false },
-  { a: 135, r: 10, seen: true  }, { a: 135, r: 20, seen: false }, { a: 135, r: 30, seen: false },
-  { a: 180, r: 10, seen: true  }, { a: 180, r: 20, seen: true  }, { a: 180, r: 30, seen: true  },
-  { a: 225, r: 10, seen: true  }, { a: 225, r: 20, seen: true  }, { a: 225, r: 30, seen: true  },
-  { a: 270, r: 10, seen: true  }, { a: 270, r: 20, seen: true  }, { a: 270, r: 30, seen: true  },
-  { a: 315, r: 10, seen: true  }, { a: 315, r: 20, seen: true  }, { a: 315, r: 30, seen: true  },
-]
-
-const KINETIC_BOUNDARIES_OD = [
-  { a: 0 }, { a: 22.5 }, { a: 45 }, { a: 67.5 },
-  { a: 90 }, { a: 112.5 }, { a: 135 }, { a: 157.5 },
-  { a: 180 }, { a: 202.5 }, { a: 225 }, { a: 247.5 },
-  { a: 270 }, { a: 292.5 }, { a: 315 }, { a: 337.5 },
-].map((p, i) => ({ ...p, r: 24 + Math.sin(i * 0.8) * 4 }))
-
-const KINETIC_BOUNDARIES_OS = [
-  { a: 0 }, { a: 22.5 }, { a: 45 }, { a: 67.5 },
-  { a: 90 }, { a: 112.5 }, { a: 135 }, { a: 157.5 },
-  { a: 180 }, { a: 202.5 }, { a: 225 }, { a: 247.5 },
-  { a: 270 }, { a: 292.5 }, { a: 315 }, { a: 337.5 },
-].map((p, i) => ({ ...p, r: i >= 2 && i <= 6 ? 14 + Math.random() * 3 : 22 + Math.sin(i * 0.6) * 3 }))
-
-// ─── Polar Field Map (SVG) ─────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function polarToXY(angleDeg, radiusDeg, cx, cy, scale) {
   const rad = ((angleDeg - 90) * Math.PI) / 180
@@ -97,67 +13,92 @@ function polarToXY(angleDeg, radiusDeg, cx, cy, scale) {
   }
 }
 
-function FieldMap({ eye, staticPoints, kineticBoundaries }) {
-  const size = 260
-  const cx = size / 2
-  const cy = size / 2
-  const scale = (size / 2 - 16) / 35
+function cartesianToSvg(xDeg, yDeg, cx, cy, scale) {
+  return {
+    x: cx + xDeg * scale,
+    y: cy - yDeg * scale,
+  }
+}
+
+// ─── Field Map ────────────────────────────────────────────────────────────────
+
+function FieldMap({ eye, staticResults, kineticResults }) {
+  const size  = 280
+  const cx    = size / 2
+  const cy    = size / 2
+  const scale = (size / 2 - 18) / 35
   const rings = [5, 10, 15, 20, 25, 30, 35]
   const spokes = [0, 45, 90, 135, 180, 225, 270, 315]
 
-  // Build SVG path for kinetic isopter
-  const boundaryPath = kineticBoundaries.map((p, i) => {
-    const { x, y } = polarToXY(p.a, p.r, cx, cy, scale)
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ') + ' Z'
+  // Build isopter path from kinetic boundary points that were seen
+  // Sort by angle so the path connects correctly
+  const boundaryPoints = kineticResults
+    .filter(r => r.result === 'seen' && r.boundary_x != null && r.boundary_y != null)
+    .map(r => {
+      const angle = Math.atan2(r.boundary_y, r.boundary_x) * (180 / Math.PI)
+      const radius = Math.sqrt(r.boundary_x ** 2 + r.boundary_y ** 2)
+      return { angle, radius, x: r.boundary_x, y: r.boundary_y }
+    })
+    .sort((a, b) => a.angle - b.angle)
+
+  const boundaryPath = boundaryPoints.length >= 3
+    ? boundaryPoints.map((p, i) => {
+        const { x, y } = cartesianToSvg(p.x, p.y, cx, cy, scale)
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+      }).join(' ') + ' Z'
+    : null
 
   return (
     <svg width={size} height={size} className="block">
       {/* Rings */}
-      {rings.map((r) => (
+      {rings.map(r => (
         <circle
-          key={r}
-          cx={cx} cy={cy}
-          r={r * scale}
+          key={r} cx={cx} cy={cy} r={r * scale}
           fill="none"
-          stroke="#ffffff18"
-          strokeWidth={r === 10 || r === 20 || r === 30 ? 1.5 : 0.75}
+          stroke={r % 10 === 0 ? '#ffffff22' : '#ffffff12'}
+          strokeWidth={r % 10 === 0 ? 1.2 : 0.6}
         />
       ))}
 
       {/* Spokes */}
-      {spokes.map((a) => {
-        const inner = polarToXY(a, 0, cx, cy, scale)
+      {spokes.map(a => {
+        const inner = polarToXY(a, 0,  cx, cy, scale)
         const outer = polarToXY(a, 35, cx, cy, scale)
         return (
-          <line
-            key={a}
-            x1={inner.x} y1={inner.y}
-            x2={outer.x} y2={outer.y}
-            stroke="#ffffff12" strokeWidth={0.75}
+          <line key={a}
+            x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y}
+            stroke="#ffffff10" strokeWidth={0.6}
           />
         )
       })}
 
-      {/* Kinetic isopter fill */}
-      <path d={boundaryPath} fill="#a855f720" stroke="#a855f7" strokeWidth={1.5} strokeLinejoin="round" />
+      {/* Kinetic isopter */}
+      {boundaryPath && (
+        <path
+          d={boundaryPath}
+          fill="#a855f718"
+          stroke="#a855f7"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+      )}
 
-      {/* Static points */}
-      {staticPoints.map((p, i) => {
-        const { x, y } = polarToXY(p.a, p.r, cx, cy, scale)
-        return p.seen ? (
+      {/* Static results */}
+      {staticResults.map((r, i) => {
+        const { x, y } = cartesianToSvg(r.x_deg, r.y_deg, cx, cy, scale)
+        return r.result === 'seen' ? (
           <circle key={i} cx={x} cy={y} r={4} fill="#22c55e" opacity={0.85} />
         ) : (
           <g key={i}>
-            <line x1={x - 3.5} y1={y - 3.5} x2={x + 3.5} y2={y + 3.5} stroke="#ef4444" strokeWidth={1.5} />
-            <line x1={x + 3.5} y1={y - 3.5} x2={x - 3.5} y2={y + 3.5} stroke="#ef4444" strokeWidth={1.5} />
+            <line x1={x-3.5} y1={y-3.5} x2={x+3.5} y2={y+3.5} stroke="#ef4444" strokeWidth={1.5} />
+            <line x1={x+3.5} y1={y-3.5} x2={x-3.5} y2={y+3.5} stroke="#ef4444" strokeWidth={1.5} />
           </g>
         )
       })}
 
       {/* Fixation cross */}
-      <line x1={cx - 5} y1={cy} x2={cx + 5} y2={cy} stroke="white" strokeWidth={1.5} />
-      <line x1={cx} y1={cy - 5} x2={cx} y2={cy + 5} stroke="white" strokeWidth={1.5} />
+      <line x1={cx-5} y1={cy} x2={cx+5} y2={cy} stroke="white" strokeWidth={1.5} />
+      <line x1={cx} y1={cy-5} x2={cx} y2={cy+5} stroke="white" strokeWidth={1.5} />
 
       {/* Eye label */}
       <text x={8} y={18} fill="#ffffff60" fontSize={11} fontWeight="600">{eye}</text>
@@ -165,7 +106,7 @@ function FieldMap({ eye, staticPoints, kineticBoundaries }) {
   )
 }
 
-// ─── Metric Card ───────────────────────────────────────────────────────────────
+// ─── Metric Card ──────────────────────────────────────────────────────────────
 
 function MetricCard({ label, value, unit, sub, color }) {
   const colors = {
@@ -173,235 +114,318 @@ function MetricCard({ label, value, unit, sub, color }) {
     yellow: 'text-yellow-400',
     blue:   'text-blue-400',
     purple: 'text-purple-400',
+    red:    'text-red-400',
   }
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-1">
-      <span className="text-xs text-gray-400 uppercase tracking-wider">{label}</span>
+      <span className="text-xs text-white/40 uppercase tracking-wider">{label}</span>
       <span className={`text-2xl font-bold ${colors[color] ?? 'text-white'}`}>
-        {value}<span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>
+        {value ?? '—'}
+        {value != null && <span className="text-sm font-normal text-white/40 ml-1">{unit}</span>}
       </span>
-      {sub && <span className="text-xs text-gray-500">{sub}</span>}
+      {sub && <span className="text-xs text-white/30">{sub}</span>}
     </div>
   )
 }
 
-// ─── Eye Result Panel ─────────────────────────────────────────────────────────
+// ─── Run Panel ────────────────────────────────────────────────────────────────
 
-function EyePanel({ eye, label, metrics, interpretation, staticPoints, kineticBoundaries }) {
-  const flagStyles = {
-    normal:  'bg-green-500/15 border-green-500/30 text-green-300',
-    warning: 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300',
-    alert:   'bg-red-500/15 border-red-500/30 text-red-300',
+function RunPanel({ run }) {
+  const m = run.metrics
+
+  const detectionColor = m.detection_accuracy >= 80 ? 'green'
+    : m.detection_accuracy >= 60 ? 'yellow' : 'red'
+  const reliabilityColor = m.reliability >= 85 ? 'green'
+    : m.reliability >= 70 ? 'yellow' : 'red'
+
+  // Duration
+  let duration = null
+  if (run.start_time && run.end_time) {
+    const secs = Math.round(
+      (new Date(run.end_time) - new Date(run.start_time)) / 1000
+    )
+    duration = secs < 60
+      ? `${secs}s`
+      : `${Math.floor(secs / 60)}m ${secs % 60}s`
   }
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-3">
-        <VisibilityIcon className="text-purple-400" fontSize="small" />
-        <h3 className="text-sm font-semibold text-white">{label}</h3>
-        <span className={`ml-auto text-xs px-2.5 py-0.5 rounded-full border font-medium ${flagStyles[interpretation.flag]}`}>
-          {interpretation.summary}
-        </span>
-      </div>
-
-      {/* Field Map */}
+      {/* Field map */}
       <div className="flex justify-center bg-black/40 rounded-2xl border border-white/10 p-4">
-        <div className="flex flex-col items-center gap-2">
-          <FieldMap eye={eye} staticPoints={staticPoints} kineticBoundaries={kineticBoundaries} />
-          <div className="flex items-center gap-4 text-xs text-gray-400">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />Seen</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-red-500 inline-block" style={{clipPath:'polygon(0 0,100% 100%,0 100%,100% 0)'}} />Not seen</span>
-            <span className="flex items-center gap-1.5"><span className="w-6 h-0.5 bg-purple-400 inline-block" />Isopter</span>
+        <div className="flex flex-col items-center gap-3">
+          <FieldMap
+            eye={run.eye}
+            staticResults={run.static_results}
+            kineticResults={run.kinetic_results}
+          />
+          <div className="flex items-center gap-4 text-xs text-white/40">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+              Seen
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 inline-block relative">
+                <svg width="10" height="10" viewBox="0 0 10 10">
+                  <line x1="0" y1="0" x2="10" y2="10" stroke="#ef4444" strokeWidth="1.5"/>
+                  <line x1="10" y1="0" x2="0" y2="10" stroke="#ef4444" strokeWidth="1.5"/>
+                </svg>
+              </span>
+              Not seen
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-0.5 bg-purple-400 inline-block" />
+              Isopter
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Metrics grid */}
+      {/* Metrics */}
       <div className="grid grid-cols-2 gap-3">
         <MetricCard
           label="Detection Accuracy"
-          value={metrics.detectionAccuracy}
+          value={m.detection_accuracy}
           unit="%"
-          sub={`${metrics.stimuliSeen}/${metrics.stimuliTotal} stimuli seen`}
-          color="green"
-        />
-        <MetricCard
-          label="Sensitivity"
-          value={metrics.sensitivity}
-          unit="%"
-          sub="Correct detections vs. presented"
-          color="blue"
+          sub={`${m.stimuli_seen}/${m.stimuli_total} stimuli seen`}
+          color={detectionColor}
         />
         <MetricCard
           label="Avg Reaction Time"
-          value={metrics.avgReactionTime}
+          value={m.avg_reaction_time}
           unit="ms"
-          sub="Across all seen stimuli"
+          sub="Across seen stimuli"
           color="yellow"
         />
         <MetricCard
-          label="Test Reliability"
-          value={metrics.reliability}
-          unit="%"
-          sub={`${metrics.fixationLosses} fixation loss${metrics.fixationLosses !== 1 ? 'es' : ''}`}
+          label="Kinetic Boundary"
+          value={m.kinetic_boundary_points}
+          unit={`/ ${m.kinetic_total}`}
+          sub="Points with response"
           color="purple"
+        />
+        <MetricCard
+          label="Test Reliability"
+          value={m.reliability}
+          unit="%"
+          sub={`${run.fixation_loss_count} fixation loss${run.fixation_loss_count !== 1 ? 'es' : ''}`}
+          color={reliabilityColor}
         />
       </div>
 
-      {/* Stimulus detection breakdown */}
+      {/* Progress bars */}
       <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3">
-        <span className="text-xs text-gray-400 uppercase tracking-wider">Stimulus Detection</span>
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-between text-xs text-gray-300">
-            <span>Static ({metrics.stimuliSeen}/{metrics.stimuliTotal})</span>
-            <span>{metrics.detectionAccuracy}%</span>
+        <span className="text-xs text-white/40 uppercase tracking-wider">Stimulus Breakdown</span>
+        <div className="flex flex-col gap-3">
+          <div>
+            <div className="flex justify-between text-xs text-white/50 mb-1">
+              <span>Static detection ({m.stimuli_seen}/{m.stimuli_total})</span>
+              <span>{m.detection_accuracy}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full bg-green-500 transition-all"
+                style={{ width: `${m.detection_accuracy}%` }} />
+            </div>
           </div>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-green-500 transition-all"
-              style={{ width: `${metrics.detectionAccuracy}%` }}
-            />
+          <div>
+            <div className="flex justify-between text-xs text-white/50 mb-1">
+              <span>Kinetic boundary ({m.kinetic_boundary_points}/{m.kinetic_total})</span>
+              <span>{m.kinetic_total > 0 ? Math.round((m.kinetic_boundary_points / m.kinetic_total) * 100) : 0}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full bg-purple-500 transition-all"
+                style={{ width: `${m.kinetic_total > 0 ? (m.kinetic_boundary_points / m.kinetic_total) * 100 : 0}%` }} />
+            </div>
           </div>
-          <div className="flex justify-between text-xs text-gray-300 mt-1">
-            <span>Kinetic boundary ({metrics.kineticBoundaryPoints}/{metrics.kineticTotal})</span>
-            <span>{Math.round((metrics.kineticBoundaryPoints / metrics.kineticTotal) * 100)}%</span>
-          </div>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-purple-500 transition-all"
-              style={{ width: `${(metrics.kineticBoundaryPoints / metrics.kineticTotal) * 100}%` }}
-            />
+          <div>
+            <div className="flex justify-between text-xs text-white/50 mb-1">
+              <span>Fixation reliability</span>
+              <span>{m.reliability}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full bg-purple-400 transition-all"
+                style={{ width: `${m.reliability}%` }} />
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Duration */}
+      {duration && (
+        <p className="text-xs text-white/25 text-center">
+          Test duration: {duration}
+        </p>
+      )}
     </div>
   )
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
-function TestResults() {
-  const [activeEye, setActiveEye] = useState('OD')
+export default function TestResults() {
+  const [searchParams]  = useSearchParams()
+  const runId           = searchParams.get('run_id')
+  const { authFetch }   = useAuth()
 
-  const eyeData = {
-    OD: {
-      label: 'OD — Right Eye',
-      metrics: MOCK_METRICS.OD,
-      interpretation: MOCK_INTERPRETATION.OD,
-      staticPoints: STATIC_POINTS,
-      kineticBoundaries: KINETIC_BOUNDARIES_OD,
-    },
-    OS: {
-      label: 'OS — Left Eye',
-      metrics: MOCK_METRICS.OS,
-      interpretation: MOCK_INTERPRETATION.OS,
-      staticPoints: STATIC_POINTS.map((p) => ({
-        ...p,
-        seen: p.a >= 45 && p.a <= 135 && p.r >= 20 ? false : p.seen,
-      })),
-      kineticBoundaries: KINETIC_BOUNDARIES_OS,
-    },
+  const [data,      setData]      = useState(null)
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
+  const [activeEye, setActiveEye] = useState(null)
+
+  const fetchResults = useCallback(async () => {
+  if (!runId) { setError('No run ID provided'); setLoading(false); return }
+
+  try {
+    // Step 1 — get run to find session_id
+    const runRes = await authFetch(
+      `${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`
+    )
+    if (!runRes.ok) throw new Error('Run not found')
+    const run = await runRes.json()
+
+    // Step 2 — get full session results using session_id from run
+    const sessionRes = await authFetch(
+      `${API_BASE_URL}/api/visual-tests/sessions/${run.session_id}/results/`
+    )
+    if (!sessionRes.ok) throw new Error('Results not found')
+    const results = await sessionRes.json()
+
+    setData(results)
+    if (results.runs.length > 0) {
+      setActiveEye(results.runs[0].eye)
+    }
+  } catch (err) {
+    setError(err.message)
+  } finally {
+    setLoading(false)
+  }
+}, [runId, authFetch])
+
+  useEffect(() => { fetchResults() }, [fetchResults])
+
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0d0d1a] flex items-center justify-center">
+        <p className="text-white/30 text-sm">Loading results…</p>
+      </div>
+    )
   }
 
-  const current = eyeData[activeEye]
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#0d0d1a] flex flex-col items-center justify-center gap-4">
+        <p className="text-red-400 text-sm">{error}</p>
+        <Link to="/test" className="text-white/40 text-xs hover:text-white transition-colors">
+          ← Back to test menu
+        </Link>
+      </div>
+    )
+  }
+
+  const { session, patient, runs } = data
+  const activeRun = runs.find(r => r.eye === activeEye)
+
+  const SEX_LABELS = { M: 'Male', F: 'Female', X: 'Other', U: 'Unknown' }
 
   return (
-    <div className="relative min-h-screen bg-[#0d0d1a] text-white overflow-x-hidden">
-      {/* Background image isolated so it doesn't affect content opacity */}
-      <div
-        className="fixed inset-0 bg-center bg-cover bg-no-repeat pointer-events-none"
-        style={{ backgroundImage: `url(${bg})`, opacity: 0.08 }}
-      />
+    <div className="relative min-h-screen bg-[#0d0d1a] text-white overflow-x-hidden font-sans">
 
       {/* Top bar */}
       <div className="sticky top-0 z-10 bg-[#0d0d1a]/90 backdrop-blur border-b border-white/10 px-6 py-4 flex items-center gap-4">
-        <Link to="/test-menu" className="text-gray-400 hover:text-white transition-colors">
-          <ArrowBackIcon fontSize="small" />
+        <Link to="/test" className="text-white/40 hover:text-white transition-colors">
+          <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
         </Link>
-        <h1 className="text-base font-semibold">Visual Field Test Results</h1>
-        <span className="ml-auto text-xs text-gray-500">{MOCK_PATIENT.testDate}</span>
+        <h1 className="text-sm font-semibold">Visual Field Test Results</h1>
+        <span className="ml-auto text-xs text-white/25">
+          {new Date(session.session_datetime).toLocaleDateString('en-PH', {
+            year: 'numeric', month: 'long', day: 'numeric'
+          })}
+        </span>
       </div>
 
-      <div className="w-full px-8 py-8 flex flex-col gap-8">
-        {/* max-w-2xl */}
+      <div className="max-w-2xl mx-auto px-6 py-8 flex flex-col gap-8">
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
-          <div className="flex items-center gap-2 mb-1">
-            <PersonIcon className="text-purple-400" fontSize="small" />
-            <span className="text-sm font-semibold text-white">Patient Information</span>
+        {/* Patient info */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
+              viewBox="0 0 24 24" className="text-purple-400">
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
+            </svg>
+            <span className="text-sm font-semibold">Patient Information</span>
           </div>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
             {[
-              ['Name', MOCK_PATIENT.name],
-              ['Patient Code', MOCK_PATIENT.patientCode],
-              ['Age', MOCK_PATIENT.age],
-              ['Sex', MOCK_PATIENT.sex],
-              ['Assigned Doctor', MOCK_PATIENT.assignedDoctor],
-              ['Protocol', MOCK_PATIENT.protocol],
+              ['Name',            patient.full_name],
+              ['Patient Code',    patient.patient_code || '—'],
+              ['Age',             patient.age != null ? `${patient.age} years old` : '—'],
+              ['Sex',             SEX_LABELS[patient.sex] ?? patient.sex],
+              ['Assigned Doctor', patient.assigned_doctor || '—'],
+              ['Protocol',        session.protocol_name],
+              ['Performed By',    session.performed_by || '—'],
             ].map(([label, val]) => (
               <div key={label} className="flex flex-col gap-0.5">
-                <span className="text-xs text-gray-500">{label}</span>
-                <span className="text-gray-200">{val}</span>
+                <span className="text-xs text-white/30">{label}</span>
+                <span className="text-white/70">{val}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Eye Switcher */}
-        <div className="flex gap-2 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
-          {['OD', 'OS'].map((eye) => (
-            <button
-              key={eye}
-              type="button"
-              onClick={() => setActiveEye(eye)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-all hover:cursor-pointer ${
-                activeEye === eye
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              {eye === 'OD' ? 'OD — Right' : 'OS — Left'}
-            </button>
-          ))}
-        </div>
+        {/* Eye switcher — only show if more than one run */}
+        {runs.length > 1 && (
+          <div className="flex gap-2 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
+            {runs.map(r => (
+              <button
+                key={r.eye}
+                type="button"
+                onClick={() => setActiveEye(r.eye)}
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-all
+                  ${activeEye === r.eye
+                    ? 'bg-purple-600 text-white'
+                    : 'text-white/40 hover:text-white'
+                  }`}
+              >
+                {r.eye === 'OD' ? 'OD — Right' : 'OS — Left'}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {/* Eye Result */}
-        <div className="flex flex-col gap-6">
+        {/* Single eye label if only one run */}
+        {runs.length === 1 && (
           <div className="flex items-center gap-2">
-            <AssessmentIcon className="text-purple-400" fontSize="small" />
-            <h2 className="text-sm font-semibold text-white">Test Metrics</h2>
+            <span className="text-sm font-semibold text-white">
+              {runs[0].eye === 'OD' ? 'OD — Right Eye' : 'OS — Left Eye'}
+            </span>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium
+              ${runs[0].status === 'completed'
+                ? 'bg-green-500/15 border-green-500/30 text-green-300'
+                : 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300'
+              }`}>
+              {runs[0].status}
+            </span>
           </div>
-          <EyePanel key={activeEye} eye={activeEye} {...current} />
-        </div>
+        )}
 
-        {/* Recommendations */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <LightbulbIcon className="text-yellow-400" fontSize="small" />
-            <span className="text-sm font-semibold text-white">Recommendations & Interpretation</span>
+        {/* Run panel */}
+        {activeRun && <RunPanel run={activeRun} />}
+
+        {/* Notes */}
+        {session.notes && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+            <p className="text-xs text-white/30 uppercase tracking-wider mb-2">Session Notes</p>
+            <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap">
+              {session.notes}
+            </p>
           </div>
-          <div className="flex flex-col gap-4">
-            {Object.entries(MOCK_INTERPRETATION).map(([eye, data]) => {
-              const flagStyles = {
-                normal:  'border-l-green-500  bg-green-500/10',
-                warning: 'border-l-yellow-500 bg-yellow-500/10',
-                alert:   'border-l-red-500    bg-red-500/10',
-              }
-              return (
-                <div key={eye} className={`border-l-2 rounded-r-xl px-4 py-3 flex flex-col gap-1 ${flagStyles[data.flag]}`}>
-                  <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-                    {eye === 'OD' ? 'OD — Right Eye' : 'OS — Left Eye'}
-                  </span>
-                  <span className="text-sm text-gray-200">{data.detail}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+        )}
 
       </div>
     </div>
   )
 }
-
-export default TestResults

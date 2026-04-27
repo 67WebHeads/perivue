@@ -150,18 +150,19 @@ class TestRunSerializer(serializers.ModelSerializer):
 
 class TestRunStateSerializer(serializers.ModelSerializer):
     current_point = serializers.SerializerMethodField()
-    protocol      = serializers.SerializerMethodField()
+    protocol = serializers.SerializerMethodField()
 
     class Meta:
         model = TestRun
         fields = [
             "id",
+            "session_id",
             "status",
             "current_point_index",
             "is_fixating",
             "fixation_loss_count",
-            "gaze_x",        # ← add
-            "gaze_y",        # ← add
+            "gaze_x",
+            "gaze_y",
             "current_point",
             "protocol",
         ]
