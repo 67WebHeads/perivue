@@ -263,8 +263,8 @@ function RunPanel({ run }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function TestResults() {
-  const [searchParams]  = useSearchParams()
-  const runId           = searchParams.get('run_id')
+  const [searchParams] = useSearchParams()
+  const runId = searchParams.get('run_id')
   const { authFetch }   = useAuth()
 
   const [data,      setData]      = useState(null)
@@ -273,33 +273,40 @@ export default function TestResults() {
   const [activeEye, setActiveEye] = useState(null)
 
   const fetchResults = useCallback(async () => {
-  if (!runId) { setError('No run ID provided'); setLoading(false); return }
+    const sessionId = searchParams.get('session_id')
+    const runId     = searchParams.get('run_id')
 
-  try {
-    // Step 1 — get run to find session_id
-    const runRes = await authFetch(
-      `${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`
-    )
-    if (!runRes.ok) throw new Error('Run not found')
-    const run = await runRes.json()
-
-    // Step 2 — get full session results using session_id from run
-    const sessionRes = await authFetch(
-      `${API_BASE_URL}/api/visual-tests/sessions/${run.session_id}/results/`
-    )
-    if (!sessionRes.ok) throw new Error('Results not found')
-    const results = await sessionRes.json()
-
-    setData(results)
-    if (results.runs.length > 0) {
-      setActiveEye(results.runs[0].eye)
+    if (!sessionId && !runId) {
+      setError('No session or run ID provided')
+      setLoading(false)
+      return
     }
-  } catch (err) {
-    setError(err.message)
-  } finally {
-    setLoading(false)
-  }
-}, [runId, authFetch])
+
+    try {
+      let resolvedSessionId = sessionId
+
+      // If we only have run_id, look up the session_id from run state
+      if (!resolvedSessionId) {
+        const runRes = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
+        if (!runRes.ok) throw new Error('Run not found')
+        const run = await runRes.json()
+        resolvedSessionId = run.session_id
+      }
+
+      const sessionRes = await authFetch(
+        `${API_BASE_URL}/api/visual-tests/sessions/${resolvedSessionId}/results/`
+      )
+      if (!sessionRes.ok) throw new Error('Results not found')
+      const results = await sessionRes.json()
+
+      setData(results)
+      if (results.runs.length > 0) setActiveEye(results.runs[0].eye)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [runId, searchParams, authFetch])
 
   useEffect(() => { fetchResults() }, [fetchResults])
 
