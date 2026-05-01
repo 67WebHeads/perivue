@@ -113,7 +113,6 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
   const px = gazeX * W
   const py = gazeY * H
 
-  // Outer glow ring
   ctx.beginPath()
   ctx.arc(px, py, 14, 0, Math.PI * 2)
   ctx.strokeStyle = isFixating
@@ -122,7 +121,6 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
   ctx.lineWidth = 8
   ctx.stroke()
 
-  // Inner dot
   ctx.beginPath()
   ctx.arc(px, py, 6, 0, Math.PI * 2)
   ctx.fillStyle = isFixating
@@ -146,7 +144,7 @@ export default function TestScreen() {
   const [progress,   setProgress]   = useState({ current: 0, total: 40 })
   const [isFixating, setIsFixating] = useState(true)
 
-  // Trial refs
+  // ── Trial refs ────────────────────────────────────────────────────────────
   const trialActiveRef    = useRef(false)
   const trialStartRef     = useRef(null)
   const currentPointRef   = useRef(null)
@@ -157,10 +155,17 @@ export default function TestScreen() {
   const submittingRef     = useRef(false)
   const pulseAnimRef      = useRef(null)
 
-  // ── Gaze refs — used inside rAF loop to always have latest values ─────────
+  // ── Gaze refs ─────────────────────────────────────────────────────────────
   const gazePosRef    = useRef({ x: 0.5, y: 0.5 })
   const isFixatingRef = useRef(true)
 
+  // ── Stable callback refs so polling loop never restarts ───────────────────
+  const runStaticTrialRef  = useRef(null)
+  const runKineticTrialRef = useRef(null)
+  const endTrialRef        = useRef(null)
+  const stopMediaPipeRef   = useRef(null)
+
+  // ── Canvas resize ─────────────────────────────────────────────────────────
   function resizeCanvas() {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -175,7 +180,7 @@ export default function TestScreen() {
     return () => window.removeEventListener('resize', resizeCanvas)
   }, [])
 
-  // ── Pulse + gaze dot animation — only while overlay is visible ────────────
+  // ── Pulse + gaze animation — only while overlay is visible ────────────────
   useEffect(() => {
     if (!overlay) {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
@@ -192,7 +197,6 @@ export default function TestScreen() {
       if (canvasRef.current) {
         gridMeta.current = drawGrid(canvasRef.current)
         drawCalibrationDot(canvasRef.current, gridMeta.current, pulse)
-        // Draw gaze dot using refs so we always get the latest values
         drawGazeDot(
           canvasRef.current,
           gazePosRef.current.x,
@@ -217,10 +221,10 @@ export default function TestScreen() {
         `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/stop/`,
         { method: 'POST' }
       )
-    } catch {
-      // Non-fatal
-    }
+    } catch { }
   }, [runId, authFetch])
+
+  useEffect(() => { stopMediaPipeRef.current = stopMediaPipe }, [stopMediaPipe])
 
   // ── Submit result ─────────────────────────────────────────────────────────
   const submitResult = useCallback(async (result, responseTimeMs, boundaryX = null, boundaryY = null) => {
@@ -265,11 +269,12 @@ export default function TestScreen() {
       clearTimeout(responseWindowRef.current)
       responseWindowRef.current = null
     }
-
     if (canvasRef.current) {
       gridMeta.current = drawGrid(canvasRef.current)
     }
   }, [])
+
+  useEffect(() => { endTrialRef.current = endTrial }, [endTrial])
 
   // ── Static trial ──────────────────────────────────────────────────────────
   const runStaticTrial = useCallback((point, protocol) => {
@@ -297,6 +302,8 @@ export default function TestScreen() {
       }, 2000)
     }, delay)
   }, [submitResult])
+
+  useEffect(() => { runStaticTrialRef.current = runStaticTrial }, [runStaticTrial])
 
   // ── Kinetic trial ─────────────────────────────────────────────────────────
   const runKineticTrial = useCallback((point, protocol) => {
@@ -348,6 +355,8 @@ export default function TestScreen() {
     }, 300)
   }, [submitResult])
 
+  useEffect(() => { runKineticTrialRef.current = runKineticTrial }, [runKineticTrial])
+
   // ── Patient response ──────────────────────────────────────────────────────
   const handleResponse = useCallback(async (e) => {
     if (e.code !== 'Space' && e.code !== 'Enter') return
@@ -396,7 +405,7 @@ export default function TestScreen() {
     }
   }, [handleResponse, overlay])
 
-  // ── Polling loop ──────────────────────────────────────────────────────────
+  // ── Polling loop — stable, only depends on started/runId/authFetch ────────
   useEffect(() => {
     if (!started || !runId) return
 
@@ -406,11 +415,9 @@ export default function TestScreen() {
         if (!res.ok) return
         const state = await res.json()
 
-        // Update fixation state + refs
         setIsFixating(state.is_fixating)
         isFixatingRef.current = state.is_fixating
 
-        // Update gaze position ref
         if (state.gaze_x != null && state.gaze_y != null) {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
@@ -420,15 +427,15 @@ export default function TestScreen() {
         if (state.status === 'completed' || state.status === 'aborted') {
           setCompleted(true)
           setStarted(false)
-          endTrial()
-          await stopMediaPipe()
+          endTrialRef.current?.()
+          stopMediaPipeRef.current?.()
           return
         }
 
         if (state.status === 'paused') {
           setPaused(true)
           setOverlay(true)
-          endTrial()
+          endTrialRef.current?.()
           return
         }
 
@@ -442,9 +449,9 @@ export default function TestScreen() {
           pointIndex > lastPointIndexRef.current
         ) {
           if (state.current_point.point_type === 'static') {
-            runStaticTrial(state.current_point, state.protocol)
+            runStaticTrialRef.current?.(state.current_point, state.protocol)
           } else if (state.current_point.point_type === 'kinetic') {
-            runKineticTrial(state.current_point, state.protocol)
+            runKineticTrialRef.current?.(state.current_point, state.protocol)
           }
         }
       } catch (err) {
@@ -455,9 +462,9 @@ export default function TestScreen() {
     poll()
     const interval = setInterval(poll, 1000)
     return () => clearInterval(interval)
-  }, [started, runId, authFetch, runStaticTrial, runKineticTrial, endTrial, stopMediaPipe])
+  }, [started, runId, authFetch])
 
-  // ── Also poll gaze during overlay (pre-test calibration phase) ────────────
+  // ── Gaze polling during overlay ───────────────────────────────────────────
   useEffect(() => {
     if (!overlay || !runId) return
 
@@ -466,14 +473,11 @@ export default function TestScreen() {
         const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
         if (!res.ok) return
         const state = await res.json()
-
         isFixatingRef.current = state.is_fixating
         if (state.gaze_x != null && state.gaze_y != null) {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
-      } catch {
-        // Ignore
-      }
+      } catch { }
     }
 
     pollGaze()
@@ -501,7 +505,7 @@ export default function TestScreen() {
     await sendCommand('pause')
     setOverlay(true)
     setPaused(true)
-    endTrial()
+    endTrialRef.current?.()
   }
 
   // ── Completed screen ──────────────────────────────────────────────────────
@@ -534,6 +538,7 @@ export default function TestScreen() {
     )
   }
 
+  // ── Main render ───────────────────────────────────────────────────────────
   return (
     <div
       className="relative w-screen h-screen bg-black overflow-hidden cursor-none"
@@ -550,7 +555,7 @@ export default function TestScreen() {
         </div>
       )}
 
-      {/* Fixation warning */}
+      {/* Fixation warning — indicator only, does not pause */}
       {!isFixating && started && !overlay && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20
           px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/30
@@ -565,7 +570,7 @@ export default function TestScreen() {
           <div className="flex items-center justify-between px-5 py-4 pointer-events-auto">
             <Link
               to="/test"
-              onClick={() => { sendCommand('abort'); stopMediaPipe() }}
+              onClick={() => { sendCommand('abort'); stopMediaPipeRef.current?.() }}
               className="w-8 h-8 flex items-center justify-center rounded-full
                 bg-white/8 border border-white/12 text-white/50
                 hover:text-white hover:bg-white/15 transition-all"

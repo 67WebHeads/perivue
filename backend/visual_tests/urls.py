@@ -38,6 +38,19 @@ urlpatterns = [
         views.FixationStatusView.as_view(),
         name="run-fixation",
     ),
-    path("runs/<uuid:run_pk>/mediapipe/start/", views.MediaPipeStartView.as_view(), name="mediapipe-start"),
-    path("runs/<uuid:run_pk>/mediapipe/stop/",  views.MediaPipeStopView.as_view(), name="mediapipe-stop"),
+    path(
+        "runs/<uuid:run_pk>/mediapipe/start/",
+        views.MediaPipeStartView.as_view(),
+        name="mediapipe-start",
+    ),
+    path(
+        "runs/<uuid:run_pk>/mediapipe/stop/",
+        views.MediaPipeStopView.as_view(),
+        name="mediapipe-stop",
+    ),
+    path(
+        "sessions/<uuid:pk>/results/",
+        views.SessionResultsView.as_view(),
+        name="session-results",
+    ),
 ]
