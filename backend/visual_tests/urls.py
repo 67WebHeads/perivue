@@ -53,4 +53,5 @@ urlpatterns = [
         views.SessionResultsView.as_view(),
         name="session-results",
     ),
+    path("dashboard/stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
 ]
