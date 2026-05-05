@@ -58,4 +58,5 @@ urlpatterns = [
         views.SessionEmailView.as_view(),
         name="session-email",
     ),
+    path("dashboard/stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
 ]

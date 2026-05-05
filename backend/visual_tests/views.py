@@ -602,3 +602,83 @@ class SessionEmailView(APIView):
             )
 
         return Response({"ok": True, "sent_to": to_email})
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from patients.models import Patient
+        from django.utils import timezone
+        from dateutil.relativedelta import relativedelta
+
+        now = timezone.now()
+        this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        last_month_start = this_month_start - relativedelta(months=1)
+
+        def pct_change(current, previous):
+            if previous == 0:
+                return None
+            change = round(((current - previous) / previous) * 100)
+            return change
+
+        # Patients
+        total_patients = Patient.objects.count()
+        patients_this_month = Patient.objects.filter(created_at__gte=this_month_start).count()
+        patients_last_month = Patient.objects.filter(
+            created_at__gte=last_month_start, created_at__lt=this_month_start
+        ).count()
+        patients_trend = pct_change(patients_this_month, patients_last_month)
+
+        # Sessions
+        total_sessions = TestSession.objects.count()
+        sessions_this_month = TestSession.objects.filter(session_datetime__gte=this_month_start).count()
+        sessions_last_month = TestSession.objects.filter(
+            session_datetime__gte=last_month_start, session_datetime__lt=this_month_start
+        ).count()
+        sessions_trend = pct_change(sessions_this_month, sessions_last_month)
+
+        # Passing rate (all-time vs last month)
+        def compute_passing_rate(runs_qs):
+            seen = 0
+            total = 0
+            for run in runs_qs.only("trials"):
+                for trial in run.trials or []:
+                    result = trial.get("result")
+                    if result in ("seen", "not_seen"):
+                        total += 1
+                        if result == "seen":
+                            seen += 1
+            return round((seen / total) * 100) if total > 0 else None
+
+        passing_rate = compute_passing_rate(TestRun.objects.all())
+        passing_rate_last_month = compute_passing_rate(
+            TestRun.objects.filter(start_time__gte=last_month_start, start_time__lt=this_month_start)
+        )
+        passing_rate_this_month = compute_passing_rate(
+            TestRun.objects.filter(start_time__gte=this_month_start)
+        )
+        passing_rate_trend = pct_change(
+            passing_rate_this_month or 0, passing_rate_last_month or 0
+        ) if passing_rate_last_month is not None else None
+
+        # Patients tested today
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        patients_today = (
+            TestSession.objects.filter(session_datetime__gte=today_start)
+            .values("patient")
+            .distinct()
+            .count()
+        )
+
+        return Response(
+            {
+                "total_patients": total_patients,
+                "patients_trend": patients_trend,
+                "total_sessions": total_sessions,
+                "sessions_trend": sessions_trend,
+                "passing_rate": passing_rate,
+                "passing_rate_trend": passing_rate_trend,
+                "patients_today": patients_today,
+            }
+        )
