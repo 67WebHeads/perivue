@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import background from "../assets/PeriVue_Background.webp";
 import splash_art_perivue from "../assets/splash_art_perivue.png";
@@ -13,6 +14,7 @@ function Layout() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const navItems = [
     { path: "/dashboard", label: "Dashboard", icon: <SpaceDashboardIcon /> },
@@ -57,8 +59,14 @@ function Layout() {
             <img src={splash_art_perivue} alt="Splash" className="w-[90px] h-[90px] object-cover" />
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm opacity-80">John Doe</span>
-            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">JD</div>
+            <span className="text-sm opacity-80">{user?.full_name ?? "—"}</span>
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="avatar" className="w-8 h-8 rounded-full object-cover" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-medium">
+                {user?.full_name?.split(" ").map((n) => n[0]).slice(0, 2).join("") ?? "?"}
+              </div>
+            )}
           </div>
         </div>
 
