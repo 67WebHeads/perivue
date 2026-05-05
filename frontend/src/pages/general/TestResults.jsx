@@ -326,7 +326,7 @@ export default function TestResults() {
     return (
       <div className="min-h-screen bg-[#0d0d1a] flex flex-col items-center justify-center gap-4">
         <p className="text-red-400 text-sm">{error}</p>
-        <Link to="/test" className="text-white/40 text-xs hover:text-white transition-colors">
+        <Link to="/records" className="text-white/40 text-xs hover:text-white transition-colors">
           ← Back to test menu
         </Link>
       </div>
@@ -342,8 +342,8 @@ export default function TestResults() {
     <div className="relative min-h-screen bg-[#0d0d1a] text-white overflow-x-hidden font-sans">
 
       {/* Top bar */}
-      <div className="sticky top-0 z-10 bg-[#0d0d1a]/90 backdrop-blur border-b border-white/10 px-6 py-4 flex items-center gap-4">
-        <Link to="/test" className="text-white/40 hover:text-white transition-colors">
+      <div className="sticky top-0 z-10 bg-[#0d0d1a] border-b border-white/10 px-6 py-4 flex items-center gap-4">
+        <Link to="/records" className="text-white/40 hover:text-white transition-colors">
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
