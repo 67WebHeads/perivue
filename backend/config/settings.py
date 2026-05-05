@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 # Load environment variables from the .env file
 load_dotenv()
 
+import os
+if os.getenv("SSL_CERT_FILE"):
+    os.environ["SSL_CERT_FILE"] = os.getenv("SSL_CERT_FILE")
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 

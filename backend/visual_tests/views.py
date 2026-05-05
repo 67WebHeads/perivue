@@ -1,9 +1,18 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.core.mail import EmailMessage
+from django.conf import settings
+import ssl
+import smtplib
+import certifi
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser
 import subprocess
 import sys
 import os
@@ -516,7 +525,80 @@ class SessionResultsView(APIView):
                     "age": session.patient.age,
                     "sex": session.patient.sex,
                     "assigned_doctor": session.patient.assigned_doctor,
+                    "email": session.patient.email,
                 },
                 "runs": runs_data,
             }
         )
+
+
+class SessionEmailView(APIView):
+    """
+    Accepts a multipart upload (pdf file + to/subject/body) and emails the
+    patient's results PDF via the configured SMTP backend.
+    """
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, pk):
+        session = get_object_or_404(
+            TestSession.objects.select_related("patient"), pk=pk
+        )
+
+        pdf_file = request.FILES.get("pdf")
+        if not pdf_file:
+            return Response(
+                {"error": "pdf file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        to_email = (request.data.get("to") or session.patient.email or "").strip()
+        if not to_email:
+            return Response(
+                {"error": "Recipient email not provided and patient has no email on file."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        subject = request.data.get("subject") or (
+            f"Visual Field Test Results — {session.patient.full_name}"
+        )
+        body = request.data.get("body") or (
+            f"Dear {session.patient.full_name},\n\n"
+            "Please find attached the report for your peripheral vision test.\n\n"
+            "Regards,\nPeriVue / CEU Eye Clinic"
+        )
+
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = settings.DEFAULT_FROM_EMAIL
+            msg["To"] = to_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(body, "plain"))
+
+            attachment = MIMEApplication(pdf_file.read(), _subtype="pdf")
+            attachment.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=pdf_file.name or "perivue_results.pdf",
+            )
+            msg.attach(attachment)
+
+            context = ssl.create_default_context(cafile=certifi.where())
+            with smtplib.SMTP(
+                settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=60
+            ) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=context)
+                smtp.ehlo()
+                smtp.login(settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD)
+                smtp.send_message(msg)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": f"{type(e).__name__}: {e}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({"ok": True, "sent_to": to_email})
