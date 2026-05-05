@@ -580,6 +580,15 @@ class DashboardStatsView(APIView):
             passing_rate_this_month or 0, passing_rate_last_month or 0
         ) if passing_rate_last_month is not None else None
 
+        # Patients tested today
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        patients_today = (
+            TestSession.objects.filter(session_datetime__gte=today_start)
+            .values("patient")
+            .distinct()
+            .count()
+        )
+
         return Response(
             {
                 "total_patients": total_patients,
@@ -588,5 +597,6 @@ class DashboardStatsView(APIView):
                 "sessions_trend": sessions_trend,
                 "passing_rate": passing_rate,
                 "passing_rate_trend": passing_rate_trend,
+                "patients_today": patients_today,
             }
         )
