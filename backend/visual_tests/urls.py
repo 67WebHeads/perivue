@@ -53,5 +53,10 @@ urlpatterns = [
         views.SessionResultsView.as_view(),
         name="session-results",
     ),
+    path(
+        "sessions/<uuid:pk>/email/",
+        views.SessionEmailView.as_view(),
+        name="session-email",
+    ),
     path("dashboard/stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
 ]
