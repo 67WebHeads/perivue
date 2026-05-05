@@ -117,13 +117,17 @@ function MetricCard({ label, value, unit, sub, color }) {
     red:    'text-red-400',
   }
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-1">
-      <span className="text-xs text-white/40 uppercase tracking-wider">{label}</span>
-      <span className={`text-2xl font-bold ${colors[color] ?? 'text-white'}`}>
-        {value ?? '—'}
-        {value != null && <span className="text-sm font-normal text-white/40 ml-1">{unit}</span>}
-      </span>
-      {sub && <span className="text-xs text-white/30">{sub}</span>}
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-2 pb-3">
+      <span className="text-[10px] font-semibold text-white/35 uppercase tracking-widest">{label}</span>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-5xl font-bold leading-none ${colors[color] ?? 'text-white'}`}>
+          {value ?? '—'}
+        </span>
+        {value != null && unit && (
+          <span className="text-xs font-medium text-white/30">{unit}</span>
+        )}
+      </div>
+      {sub && <span className="text-[11px] text-white/40 leading-snug mt-1">{sub}</span>}
     </div>
   )
 }
@@ -151,8 +155,7 @@ function RunPanel({ run }) {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Field map */}
-      <div className="flex justify-center bg-black/40 rounded-2xl border border-white/10 p-4">
+      <div className="flex gap-4 md:flex-row flex-col items-center  justify-center bg-black/40 rounded-2xl border border-white/10 p-4">
         <div className="flex flex-col items-center gap-3">
           <FieldMap
             eye={run.eye}
@@ -179,72 +182,72 @@ function RunPanel({ run }) {
             </span>
           </div>
         </div>
-      </div>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-2 gap-3">
-        <MetricCard
-          label="Detection Accuracy"
-          value={m.detection_accuracy}
-          unit="%"
-          sub={`${m.stimuli_seen}/${m.stimuli_total} stimuli seen`}
-          color={detectionColor}
-        />
-        <MetricCard
-          label="Avg Reaction Time"
-          value={m.avg_reaction_time}
-          unit="ms"
-          sub="Across seen stimuli"
-          color="yellow"
-        />
-        <MetricCard
-          label="Kinetic Boundary"
-          value={m.kinetic_boundary_points}
-          unit={`/ ${m.kinetic_total}`}
-          sub="Points with response"
-          color="purple"
-        />
-        <MetricCard
-          label="Test Reliability"
-          value={m.reliability}
-          unit="%"
-          sub={`${run.fixation_loss_count} fixation loss${run.fixation_loss_count !== 1 ? 'es' : ''}`}
-          color={reliabilityColor}
-        />
-      </div>
-
-      {/* Progress bars */}
-      <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3">
-        <span className="text-xs text-white/40 uppercase tracking-wider">Stimulus Breakdown</span>
         <div className="flex flex-col gap-3">
-          <div>
-            <div className="flex justify-between text-xs text-white/50 mb-1">
-              <span>Static detection ({m.stimuli_seen}/{m.stimuli_total})</span>
-              <span>{m.detection_accuracy}%</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div className="h-full rounded-full bg-green-500 transition-all"
-                style={{ width: `${m.detection_accuracy}%` }} />
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <MetricCard
+              label="Detection Accuracy"
+              value={m.detection_accuracy}
+              unit="%"
+              sub={`${m.stimuli_seen}/${m.stimuli_total} stimuli seen`}
+              color={detectionColor}
+            />
+            <MetricCard
+              label="Avg Reaction Time"
+              value={m.avg_reaction_time}
+              unit="ms"
+              sub="Across seen stimuli"
+              color="yellow"
+            />
+            <MetricCard
+              label="Kinetic Boundary"
+              value={m.kinetic_boundary_points}
+              unit={`/ ${m.kinetic_total}`}
+              sub="Points with response"
+              color="purple"
+            />
+            <MetricCard
+              label="Test Reliability"
+              value={m.reliability}
+              unit="%"
+              sub={`${run.fixation_loss_count} fixation loss${run.fixation_loss_count !== 1 ? 'es' : ''}`}
+              color={reliabilityColor}
+            />
           </div>
-          <div>
-            <div className="flex justify-between text-xs text-white/50 mb-1">
-              <span>Kinetic boundary ({m.kinetic_boundary_points}/{m.kinetic_total})</span>
-              <span>{m.kinetic_total > 0 ? Math.round((m.kinetic_boundary_points / m.kinetic_total) * 100) : 0}%</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div className="h-full rounded-full bg-purple-500 transition-all"
-                style={{ width: `${m.kinetic_total > 0 ? (m.kinetic_boundary_points / m.kinetic_total) * 100 : 0}%` }} />
-            </div>
-          </div>
-          <div>
-            <div className="flex justify-between text-xs text-white/50 mb-1">
-              <span>Fixation reliability</span>
-              <span>{m.reliability}%</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div className="h-full rounded-full bg-purple-400 transition-all"
-                style={{ width: `${m.reliability}%` }} />
+
+          {/* Stimulus Breakdown */}
+          <div className="border-t border-white/5 pt-3 flex flex-col gap-3">
+            <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">Stimulus Breakdown</span>
+            <div className="flex flex-col gap-2.5">
+              <div>
+                <div className="flex justify-between text-xs text-white/50 mb-1">
+                  <span>Static detection ({m.stimuli_seen}/{m.stimuli_total})</span>
+                  <span>{m.detection_accuracy}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full bg-green-500 transition-all"
+                    style={{ width: `${m.detection_accuracy}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-white/50 mb-1">
+                  <span>Kinetic boundary ({m.kinetic_boundary_points}/{m.kinetic_total})</span>
+                  <span>{m.kinetic_total > 0 ? Math.round((m.kinetic_boundary_points / m.kinetic_total) * 100) : 0}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full bg-purple-500 transition-all"
+                    style={{ width: `${m.kinetic_total > 0 ? (m.kinetic_boundary_points / m.kinetic_total) * 100 : 0}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-white/50 mb-1">
+                  <span>Fixation reliability</span>
+                  <span>{m.reliability}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full bg-purple-400 transition-all"
+                    style={{ width: `${m.reliability}%` }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -353,9 +356,8 @@ export default function TestResults() {
         </span>
       </div>
 
-      <div className="max-w-2xl mx-auto px-6 py-8 flex flex-col gap-8">
+      <div className="max-w-3xl mx-auto px-6 py-8 flex flex-col gap-8">
 
-        {/* Patient info */}
         <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
@@ -383,7 +385,6 @@ export default function TestResults() {
           </div>
         </div>
 
-        {/* Eye switcher — only show if more than one run */}
         {runs.length > 1 && (
           <div className="flex gap-2 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
             {runs.map(r => (
