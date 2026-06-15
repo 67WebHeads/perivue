@@ -20,6 +20,9 @@ function Layout() {
     { path: "/dashboard", label: "Dashboard", icon: <SpaceDashboardIcon /> },
     { path: "/records", label: "Users", icon: <GroupIcon /> },
     { path: "/test-menu", label: "Test", icon: <TrackChangesIcon /> },
+    ...(user?.role === "admin" ? [
+      { path: "/users", label: "User Management" }
+    ] : []),
   ];
 
   useEffect(() => {

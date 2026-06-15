@@ -11,8 +11,18 @@ import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
 import TestHome from "./pages/general/TestHome.jsx";
-import TestScreen from './pages/general/TestScreen.jsx'
+import TestScreen from './pages/general/TestScreen.jsx';
 import TestResults from './pages/general/TestResults.jsx';
+import UserManagement from "./pages/general/UserManagement";
+import { useAuth } from "./context/AuthContext";
+
+// ── Admin-only route wrapper ──────────────────────────────────────────────────
+function AdminRoute({ children }) {
+  const { user } = useAuth()
+  if (!user) return null
+  if (user.role !== "admin") return <Navigate to="/dashboard" replace />
+  return children
+}
 
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
@@ -23,6 +33,7 @@ createRoot(document.getElementById("root")).render(
           <Route path="/login" element={<Login />} />
           <Route path="/complete-profile" element={<CompleteProfile />} />
 
+          {/* Protected routes inside Layout */}
           <Route
             element={
               <ProtectedRoute>
@@ -30,15 +41,22 @@ createRoot(document.getElementById("root")).render(
               </ProtectedRoute>
             }
           >
-            {/* <Route path="/home" element={<Dashboard />} /> */}
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/records" element={<Records />} />
-            <Route path="/test-menu" element={<TestHome/>} />
+            <Route path="/dashboard"  element={<Dashboard />} />
+            <Route path="/records"    element={<Records />} />
+            <Route path="/test-menu"  element={<TestHome />} />
+            <Route
+              path="/users"
+              element={
+                <AdminRoute>
+                  <UserManagement />
+                </AdminRoute>
+              }
+            />
           </Route>
-          <Route>
-            <Route path="/test/canvas" element={<TestScreen />} />
+
+          {/* Fullscreen routes — no layout */}
+          <Route path="/test/canvas"  element={<TestScreen />} />
           <Route path="/test/results" element={<TestResults />} />
-          </Route>
         </Routes>
       </AuthProvider>
     </StrictMode>
