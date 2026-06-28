@@ -346,6 +346,74 @@ class TrialResultCreateView(APIView):
         return Response(trial, status=status.HTTP_201_CREATED)
 
 
+class TrialResultBatchView(APIView):
+    """
+    The canvas POSTs all trial results at once after the test is fully complete.
+    Body: { "trials": [ { point_index, point_type, x_deg, y_deg, angle_deg,
+                           start_radius_deg, is_blindspot_check, result,
+                           response_time_ms, boundary_x_deg, boundary_y_deg,
+                           presented_at } , ... ] }
+
+    Because the canvas now owns all point metadata (hard-coded), there is no
+    DB lookup per point — we trust the client-supplied metadata and store it
+    directly.  The run is marked completed once the batch is saved.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, run_pk):
+        run = get_object_or_404(TestRun, pk=run_pk)
+
+        if run.status not in ("in_progress", "paused"):
+            return Response(
+                {"error": "Run is not in progress."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        incoming = request.data.get("trials")
+        if not isinstance(incoming, list) or len(incoming) == 0:
+            return Response(
+                {"error": "trials must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate results
+        for i, t in enumerate(incoming):
+            if t.get("result") not in VALID_RESULTS:
+                return Response(
+                    {"error": f"Trial {i}: result must be one of {sorted(VALID_RESULTS)}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Build trial records — metadata comes from the client (hard-coded points)
+        now = timezone.now().isoformat()
+        trials = []
+        for t in incoming:
+            trials.append({
+                "protocol_point_id": t.get("protocol_point_id"),
+                "point_index": t.get("point_index"),
+                "point_type": t.get("point_type"),
+                "x_deg": t.get("x_deg"),
+                "y_deg": t.get("y_deg"),
+                "angle_deg": t.get("angle_deg"),
+                "start_radius_deg": t.get("start_radius_deg"),
+                "is_blindspot_check": t.get("is_blindspot_check", False),
+                "result": t.get("result"),
+                "response_time_ms": t.get("response_time_ms"),
+                "boundary_x_deg": t.get("boundary_x_deg"),
+                "boundary_y_deg": t.get("boundary_y_deg"),
+                "presented_at": t.get("presented_at") or now,
+            })
+
+        run.trials = trials
+        run.current_point_index = len(trials) - 1
+        run.status = "completed"
+        run.end_time = timezone.now()
+        run.save()
+
+        return Response({"ok": True, "saved": len(trials)}, status=status.HTTP_201_CREATED)
+
+
 class TrialResultListView(APIView):
     """
     Returns all results for a run — used by the results view to draw the field map.
