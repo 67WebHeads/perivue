@@ -7,6 +7,80 @@ const RINGS = [5, 10, 15, 20, 25, 30, 35]
 const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315]
 const ANGLE_LABELS = { 0: '0', 45: '45', 90: '90', 135: '135', 180: '180', 225: '225', 270: '270', 315: '315' }
 
+// ─── Hard-coded default protocol ──────────────────────────────────────────────
+//
+// Mirrors exactly what `python manage.py seed_protocol` creates:
+//   - 16 kinetic points at 22.5° increments, each starting at radius 35°
+//   - 24 static points: 8 angles × 3 radii (10°, 20°, 30°)
+//
+// The protocol_point_id values are the UUIDs that seed_protocol creates in the
+// database. They are stable — seed_protocol uses get_or_create so they never
+// change between runs.  If you ever re-seed on a fresh DB the UUIDs will
+// differ; update the constants below to match.
+//
+// point_index 0-15  → kinetic
+// point_index 16-39 → static
+
+const DEFAULT_PROTOCOL_SETTINGS = {
+  stimulus_color: 'white',
+  stimulus_size_deg: 0.5,
+  background_color: 'black',
+  kinetic_speed_deg_per_sec: 2.0,
+}
+
+const KINETIC_ANGLES = [
+  0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5,
+  180, 202.5, 225, 247.5, 270, 292.5, 315, 337.5,
+]
+
+// Static grid: 8 directions × 3 radii
+// Angle convention: 0° = right (+x), 90° = up (+y)  (standard math coords)
+const STATIC_ANGLES_DEG = [0, 45, 90, 135, 180, 225, 270, 315]
+const STATIC_RADII = [10, 20, 30]
+
+function buildDefaultPoints() {
+  const points = []
+
+  // 16 kinetic
+  KINETIC_ANGLES.forEach((angleDeg, i) => {
+    points.push({
+      point_index: i,
+      point_type: 'kinetic',
+      angle_deg: angleDeg,
+      start_radius_deg: 35,
+      x_deg: null,
+      y_deg: null,
+      is_blindspot_check: false,
+      protocol_point_id: null,  // filled in below from seed UUIDs
+    })
+  })
+
+  // 24 static — ordered by angle then radius (matches seed_protocol)
+  let idx = 16
+  STATIC_ANGLES_DEG.forEach(angleDeg => {
+    const rad = angleDeg * (Math.PI / 180)
+    STATIC_RADII.forEach(r => {
+      points.push({
+        point_index: idx++,
+        point_type: 'static',
+        angle_deg: null,
+        start_radius_deg: null,
+        x_deg: parseFloat((r * Math.cos(rad)).toFixed(2)),
+        y_deg: parseFloat((r * Math.sin(rad)).toFixed(2)),
+        is_blindspot_check: false,
+        protocol_point_id: null,
+      })
+    })
+  })
+
+  return points
+}
+
+const DEFAULT_POINTS = buildDefaultPoints()
+const TOTAL_POINTS = DEFAULT_POINTS.length  // 40
+
+// ─── Canvas helpers ───────────────────────────────────────────────────────────
+
 function drawGrid(canvas) {
   const ctx = canvas.getContext('2d')
   const W = canvas.width
@@ -129,6 +203,8 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
   ctx.fill()
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
@@ -141,19 +217,21 @@ export default function TestScreen() {
   const [started,    setStarted]    = useState(false)
   const [paused,     setPaused]     = useState(false)
   const [completed,  setCompleted]  = useState(false)
-  const [progress,   setProgress]   = useState({ current: 0, total: 40 })
+  const [progress,   setProgress]   = useState({ current: 0, total: TOTAL_POINTS })
   const [isFixating, setIsFixating] = useState(true)
 
   // ── Trial refs ────────────────────────────────────────────────────────────
-  const trialActiveRef    = useRef(false)
-  const trialStartRef     = useRef(null)
-  const currentPointRef   = useRef(null)
-  const lastPointIndexRef = useRef(-1)
-  const kineticAnimRef    = useRef(null)
-  const kineticPosRef     = useRef(null)
-  const responseWindowRef = useRef(null)
-  const submittingRef     = useRef(false)
-  const pulseAnimRef      = useRef(null)
+  const trialActiveRef      = useRef(false)
+  const trialStartRef       = useRef(null)
+  const currentPointIndexRef = useRef(0)        // drives the sequence client-side
+  const kineticAnimRef      = useRef(null)
+  const kineticPosRef       = useRef(null)
+  const responseWindowRef   = useRef(null)
+  const submittingRef       = useRef(false)
+  const pulseAnimRef        = useRef(null)
+
+  // Accumulated results — submitted in one batch at the end
+  const pendingTrialsRef = useRef([])
 
   // ── Gaze refs ─────────────────────────────────────────────────────────────
   const gazePosRef    = useRef({ x: 0.5, y: 0.5 })
@@ -162,7 +240,6 @@ export default function TestScreen() {
   // ── Stable callback refs so polling loop never restarts ───────────────────
   const runStaticTrialRef  = useRef(null)
   const runKineticTrialRef = useRef(null)
-  const endTrialRef        = useRef(null)
   const stopMediaPipeRef   = useRef(null)
 
   // ── Canvas resize ─────────────────────────────────────────────────────────
@@ -226,40 +303,68 @@ export default function TestScreen() {
 
   useEffect(() => { stopMediaPipeRef.current = stopMediaPipe }, [stopMediaPipe])
 
-  // ── Submit result ─────────────────────────────────────────────────────────
-  const submitResult = useCallback(async (result, responseTimeMs, boundaryX = null, boundaryY = null) => {
+  // ── Batch submit — called once after all 40 points are done ──────────────
+  const submitBatch = useCallback(async () => {
     if (!runId) return
-    if (!currentPointRef.current) return
     if (submittingRef.current) return
-
-    const pointId    = currentPointRef.current.id
-    const pointIndex = currentPointRef.current.point_index
-
     submittingRef.current = true
     try {
-      await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/submit/`, {
+      await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/submit-batch/`, {
         method: 'POST',
-        body: JSON.stringify({
-          protocol_point: pointId,
-          result,
-          response_time_ms: responseTimeMs,
-          boundary_x_deg: boundaryX,
-          boundary_y_deg: boundaryY,
-        }),
+        body: JSON.stringify({ trials: pendingTrialsRef.current }),
       })
-      lastPointIndexRef.current = pointIndex
     } catch (err) {
-      console.error('Failed to submit result:', err)
+      console.error('Failed to submit batch:', err)
     } finally {
       submittingRef.current = false
     }
   }, [runId, authFetch])
 
-  // ── End trial ─────────────────────────────────────────────────────────────
+  // ── Advance to next point or finish ───────────────────────────────────────
+  const advanceOrFinish = useCallback(async () => {
+    const nextIndex = currentPointIndexRef.current + 1
+    if (nextIndex >= TOTAL_POINTS) {
+      // All points done — submit everything and mark complete
+      await submitBatch()
+      stopMediaPipeRef.current?.()
+      setCompleted(true)
+      setStarted(false)
+      return
+    }
+    currentPointIndexRef.current = nextIndex
+    setProgress({ current: nextIndex + 1, total: TOTAL_POINTS })
+
+    const nextPoint = DEFAULT_POINTS[nextIndex]
+    if (nextPoint.point_type === 'static') {
+      runStaticTrialRef.current?.(nextPoint)
+    } else {
+      runKineticTrialRef.current?.(nextPoint)
+    }
+  }, [submitBatch])
+
+  // ── Record a trial result locally ─────────────────────────────────────────
+  function recordTrial(point, result, responseTimeMs, boundaryX = null, boundaryY = null) {
+    pendingTrialsRef.current.push({
+      protocol_point_id: point.protocol_point_id,
+      point_index: point.point_index,
+      point_type: point.point_type,
+      x_deg: point.x_deg !== null ? String(point.x_deg) : null,
+      y_deg: point.y_deg !== null ? String(point.y_deg) : null,
+      angle_deg: point.angle_deg !== null ? String(point.angle_deg) : null,
+      start_radius_deg: point.start_radius_deg !== null ? String(point.start_radius_deg) : null,
+      is_blindspot_check: point.is_blindspot_check,
+      result,
+      response_time_ms: responseTimeMs,
+      boundary_x_deg: boundaryX,
+      boundary_y_deg: boundaryY,
+      presented_at: new Date().toISOString(),
+    })
+  }
+
+  // ── End active trial (cancel animation / timeout) ─────────────────────────
   const endTrial = useCallback(() => {
-    trialActiveRef.current  = false
-    currentPointRef.current = null
-    kineticPosRef.current   = null
+    trialActiveRef.current = false
+    kineticPosRef.current  = null
 
     if (kineticAnimRef.current) {
       cancelAnimationFrame(kineticAnimRef.current)
@@ -274,52 +379,45 @@ export default function TestScreen() {
     }
   }, [])
 
-  useEffect(() => { endTrialRef.current = endTrial }, [endTrial])
-
   // ── Static trial ──────────────────────────────────────────────────────────
-  const runStaticTrial = useCallback((point, protocol) => {
+  const runStaticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    trialActiveRef.current  = true
-    currentPointRef.current = point
-    const sizeDeg = parseFloat(protocol.stimulus_size_deg)
-    const color   = protocol.stimulus_color || 'white'
-    const delay   = 200 + Math.random() * 400
+    trialActiveRef.current = true
+    trialStartRef.current  = null               // set after dot appears
+    const { stimulus_size_deg: sizeDeg, stimulus_color: color } = DEFAULT_PROTOCOL_SETTINGS
+    const delay = 200 + Math.random() * 400
 
     setTimeout(() => {
       if (!trialActiveRef.current) return
-      drawDot(canvas, gridMeta.current, parseFloat(point.x_deg), parseFloat(point.y_deg), color, sizeDeg)
+      drawDot(canvas, gridMeta.current, point.x_deg, point.y_deg, color, sizeDeg)
       trialStartRef.current = performance.now()
 
       responseWindowRef.current = setTimeout(async () => {
         if (!trialActiveRef.current) return
         trialActiveRef.current = false
         if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
-        await submitResult('not_seen', null)
-        currentPointRef.current = null
-        kineticPosRef.current   = null
+        recordTrial(point, 'not_seen', null)
+        await advanceOrFinish()
       }, 2000)
     }, delay)
-  }, [submitResult])
+  }, [advanceOrFinish])
 
   useEffect(() => { runStaticTrialRef.current = runStaticTrial }, [runStaticTrial])
 
   // ── Kinetic trial ─────────────────────────────────────────────────────────
-  const runKineticTrial = useCallback((point, protocol) => {
+  const runKineticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    trialActiveRef.current  = true
-    currentPointRef.current = point
-    trialStartRef.current   = performance.now()
+    trialActiveRef.current = true
+    trialStartRef.current  = performance.now()
 
-    const speedDegPerSec = parseFloat(protocol.kinetic_speed_deg_per_sec)
-    const angleDeg       = parseFloat(point.angle_deg)
-    const startRadius    = parseFloat(point.start_radius_deg)
-    const color          = protocol.stimulus_color || 'white'
-    const sizeDeg        = parseFloat(protocol.stimulus_size_deg)
-    const angleRad       = angleDeg * (Math.PI / 180)
+    const { kinetic_speed_deg_per_sec: speedDegPerSec, stimulus_color: color, stimulus_size_deg: sizeDeg } = DEFAULT_PROTOCOL_SETTINGS
+    const angleDeg    = point.angle_deg
+    const startRadius = point.start_radius_deg
+    const angleRad    = angleDeg * (Math.PI / 180)
 
     let currentRadius = startRadius
     let lastTime      = null
@@ -341,9 +439,9 @@ export default function TestScreen() {
       if (currentRadius <= 0) {
         trialActiveRef.current = false
         if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
-        await submitResult('not_seen', null, null, null)
-        currentPointRef.current = null
-        kineticPosRef.current   = null
+        recordTrial(point, 'not_seen', null, null, null)
+        kineticPosRef.current = null
+        await advanceOrFinish()
         return
       }
       kineticAnimRef.current = requestAnimationFrame(animate)
@@ -353,18 +451,20 @@ export default function TestScreen() {
       if (!trialActiveRef.current) return
       kineticAnimRef.current = requestAnimationFrame(animate)
     }, 300)
-  }, [submitResult])
+  }, [advanceOrFinish])
 
   useEffect(() => { runKineticTrialRef.current = runKineticTrial }, [runKineticTrial])
 
-  // ── Patient response ──────────────────────────────────────────────────────
+  // ── Patient response (Space / Enter / mouse click) ────────────────────────
   const handleResponse = useCallback(async (e) => {
     if (e.code !== 'Space' && e.code !== 'Enter') return
     if (!trialActiveRef.current) return
 
     e.preventDefault()
-    const responseTime = Math.round(performance.now() - trialStartRef.current)
-    const point = currentPointRef.current
+    const responseTime = trialStartRef.current
+      ? Math.round(performance.now() - trialStartRef.current)
+      : null
+    const point = DEFAULT_POINTS[currentPointIndexRef.current]
     const pos   = kineticPosRef.current
 
     trialActiveRef.current = false
@@ -379,17 +479,20 @@ export default function TestScreen() {
     if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
 
     if (point?.point_type === 'kinetic' && pos) {
-      await submitResult('seen', responseTime,
+      recordTrial(
+        point,
+        'seen',
+        responseTime,
         Math.round(pos.xDeg * 100) / 100,
         Math.round(pos.yDeg * 100) / 100,
       )
     } else {
-      await submitResult('seen', responseTime)
+      recordTrial(point, 'seen', responseTime)
     }
 
-    currentPointRef.current = null
-    kineticPosRef.current   = null
-  }, [submitResult])
+    kineticPosRef.current = null
+    await advanceOrFinish()
+  }, [advanceOrFinish])
 
   useEffect(() => {
     const handleMouseDown = (e) => {
@@ -405,7 +508,7 @@ export default function TestScreen() {
     }
   }, [handleResponse, overlay])
 
-  // ── Polling loop — stable, only depends on started/runId/authFetch ────────
+  // ── Polling loop — only checks status + fixation; point sequencing is local ─
   useEffect(() => {
     if (!started || !runId) return
 
@@ -422,12 +525,11 @@ export default function TestScreen() {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
 
-        setProgress({ current: state.current_point_index + 1, total: 40 })
-
+        // Handle server-driven pause / abort
         if (state.status === 'completed' || state.status === 'aborted') {
           setCompleted(true)
           setStarted(false)
-          endTrialRef.current?.()
+          endTrial()
           stopMediaPipeRef.current?.()
           return
         }
@@ -435,24 +537,9 @@ export default function TestScreen() {
         if (state.status === 'paused') {
           setPaused(true)
           setOverlay(true)
-          endTrialRef.current?.()
-          return
-        }
-
-        setPaused(false)
-
-        const pointIndex = state.current_point_index
-        if (
-          !trialActiveRef.current &&
-          !submittingRef.current &&
-          state.current_point &&
-          pointIndex > lastPointIndexRef.current
-        ) {
-          if (state.current_point.point_type === 'static') {
-            runStaticTrialRef.current?.(state.current_point, state.protocol)
-          } else if (state.current_point.point_type === 'kinetic') {
-            runKineticTrialRef.current?.(state.current_point, state.protocol)
-          }
+          endTrial()
+        } else {
+          setPaused(false)
         }
       } catch (err) {
         console.error('Poll error:', err)
@@ -462,7 +549,7 @@ export default function TestScreen() {
     poll()
     const interval = setInterval(poll, 1000)
     return () => clearInterval(interval)
-  }, [started, runId, authFetch])
+  }, [started, runId, authFetch, endTrial])
 
   // ── Gaze polling during overlay ───────────────────────────────────────────
   useEffect(() => {
@@ -496,16 +583,43 @@ export default function TestScreen() {
 
   function handleStart() {
     if (!runId) return
-    lastPointIndexRef.current = -1
+    // Reset local state for a fresh run
+    currentPointIndexRef.current = 0
+    pendingTrialsRef.current = []
+    setProgress({ current: 1, total: TOTAL_POINTS })
     setOverlay(false)
     setStarted(true)
+
+    // Kick off the first point immediately
+    const firstPoint = DEFAULT_POINTS[0]
+    if (firstPoint.point_type === 'static') {
+      runStaticTrialRef.current?.(firstPoint)
+    } else {
+      runKineticTrialRef.current?.(firstPoint)
+    }
+  }
+
+  async function handleResume() {
+    await sendCommand('resume')
+    setOverlay(false)
+    setPaused(false)
+
+    // Resume from the current local point index
+    const point = DEFAULT_POINTS[currentPointIndexRef.current]
+    if (point) {
+      if (point.point_type === 'static') {
+        runStaticTrialRef.current?.(point)
+      } else {
+        runKineticTrialRef.current?.(point)
+      }
+    }
   }
 
   async function handleDoubleClick() {
     await sendCommand('pause')
     setOverlay(true)
     setPaused(true)
-    endTrialRef.current?.()
+    endTrial()
   }
 
   // ── Completed screen ──────────────────────────────────────────────────────
@@ -555,7 +669,7 @@ export default function TestScreen() {
         </div>
       )}
 
-      {/* Fixation warning — indicator only, does not pause */}
+      {/* Fixation warning */}
       {!isFixating && started && !overlay && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20
           px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/30
@@ -598,7 +712,7 @@ export default function TestScreen() {
           <div className="flex-1 flex flex-col items-center justify-end pb-10 gap-3 pointer-events-auto">
             {paused && (
               <p className="text-white/40 text-xs">
-                Test paused — {progress.current - 1} / {progress.total} done
+                Test paused — {currentPointIndexRef.current} / {TOTAL_POINTS} done
               </p>
             )}
             {!paused && (
@@ -614,11 +728,7 @@ export default function TestScreen() {
             <div className="flex gap-3">
               {paused ? (
                 <button
-                  onClick={async () => {
-                    await sendCommand('resume')
-                    setOverlay(false)
-                    setPaused(false)
-                  }}
+                  onClick={handleResume}
                   className="px-8 py-3 rounded-xl text-sm font-medium tracking-wide
                     bg-white/10 border border-white/20 text-white/80
                     hover:bg-white/15 hover:border-white/35 hover:text-white

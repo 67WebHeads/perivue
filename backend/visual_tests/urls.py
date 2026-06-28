@@ -27,10 +27,17 @@ urlpatterns = [
         views.TrialResultListView.as_view(),
         name="run-results",
     ),
+    # Single-trial submit (kept for backward compat / clinician overrides)
     path(
         "runs/<uuid:run_pk>/submit/",
         views.TrialResultCreateView.as_view(),
         name="run-submit",
+    ),
+    # Batch submit — canvas posts all trials at once after test completion
+    path(
+        "runs/<uuid:run_pk>/submit-batch/",
+        views.TrialResultBatchView.as_view(),
+        name="run-submit-batch",
     ),
     # Fixation — called by MediaPipe script
     path(
