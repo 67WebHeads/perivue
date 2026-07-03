@@ -6,7 +6,7 @@ import splash_art_perivue from "../assets/splash_art_perivue.png";
 import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
 import GroupIcon from "@mui/icons-material/Group";
 import LogoutIcon from "@mui/icons-material/Logout";
-import TrackChangesIcon from '@mui/icons-material/TrackChanges';
+import TrackChangesIcon from "@mui/icons-material/TrackChanges";
 
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
@@ -14,7 +14,7 @@ function Layout() {
 
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const navItems = [
     { path: "/dashboard", label: "Dashboard", icon: <SpaceDashboardIcon /> },
@@ -39,6 +39,11 @@ function Layout() {
   useEffect(() => {
     if (isMobile) setIsOpen(false);
   }, [location, isMobile]);
+
+  async function handleLogout() {
+    await logout();
+    navigate("/login", { replace: true });
+  }
 
   return (
     <div className="h-dvh bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url(${background})` }}>
@@ -125,7 +130,7 @@ function Layout() {
 
             <div className="p-4 border-t border-white/10">
               <button
-                onClick={() => navigate("/login")}
+                onClick={handleLogout}
                 className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-red-500/20 text-white/80 hover:text-white transition-all duration-200"
               >
                 <span className="text-xl flex-shrink-0">

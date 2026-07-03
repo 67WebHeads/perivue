@@ -3,7 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth();
+  const { user, loading, sessionExpired } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -19,7 +19,13 @@ export default function ProtectedRoute({ children }) {
 
   if (!user) {
     // Preserve the page the user tried to visit so we can redirect after login
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return (
+      <Navigate
+        to="/login"
+        state={{ from: location, sessionExpired }}
+        replace
+      />
+    );
   }
 
   return children;
