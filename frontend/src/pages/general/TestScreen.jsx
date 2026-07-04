@@ -232,6 +232,23 @@ export default function TestScreen() {
   const [isFixating, setIsFixating] = useState(true)
   const [calibMessage, setCalibMessage] = useState('')
 
+  // ── Fixation-loss auto-pause ──────────────────────────────────────────────
+  // When the (calibrated) gaze leaves the center, the test halts on the
+  // current point until the clinician presses Space/Enter or clicks; the
+  // interrupted point is then repeated, not recorded.
+  const [fixationPaused, setFixationPaused] = useState(false)
+  const fixationPausedRef = useRef(false)
+
+  // ── Eye tracking toggle + tracker health ──────────────────────────────────
+  // Persisted so the clinician doesn't have to re-disable it every session
+  // (e.g. when macOS camera permission isn't sorted out on this machine)
+  const [eyeTracking, setEyeTracking] = useState(
+    () => localStorage.getItem('perivue_eye_tracking') !== 'off'
+  )
+  const eyeTrackingRef = useRef(eyeTracking)
+  const [tracker, setTracker] = useState({ running: false, camera_ok: null })
+  const [faceDetected, setFaceDetected] = useState(false)
+
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
 
@@ -272,9 +289,9 @@ export default function TestScreen() {
     return () => window.removeEventListener('resize', resizeCanvas)
   }, [])
 
-  // ── Pulse + gaze animation — only while overlay is visible ────────────────
+  // ── Pulse + gaze animation — while overlay or fixation pause is shown ─────
   useEffect(() => {
-    if (!overlay) {
+    if (!overlay && !fixationPaused) {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
       if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
       return
@@ -289,12 +306,14 @@ export default function TestScreen() {
       if (canvasRef.current) {
         gridMeta.current = drawGrid(canvasRef.current)
         drawCalibrationDot(canvasRef.current, 0.5, 0.5, pulse)
-        drawGazeDot(
-          canvasRef.current,
-          gazePosRef.current.x,
-          gazePosRef.current.y,
-          isFixatingRef.current
-        )
+        if (eyeTrackingRef.current) {
+          drawGazeDot(
+            canvasRef.current,
+            gazePosRef.current.x,
+            gazePosRef.current.y,
+            isFixatingRef.current
+          )
+        }
       }
       pulseAnimRef.current = requestAnimationFrame(animatePulse)
     }
@@ -303,7 +322,7 @@ export default function TestScreen() {
     return () => {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
     }
-  }, [overlay])
+  }, [overlay, fixationPaused])
 
   // ── Stop MediaPipe ────────────────────────────────────────────────────────
   const stopMediaPipe = useCallback(async () => {
@@ -398,6 +417,7 @@ export default function TestScreen() {
   const runStaticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (fixationPausedRef.current) return  // resume will re-run this point
 
     trialActiveRef.current = true
     trialStartRef.current  = null               // set after dot appears
@@ -425,6 +445,7 @@ export default function TestScreen() {
   const runKineticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (fixationPausedRef.current) return  // resume will re-run this point
 
     trialActiveRef.current = true
     trialStartRef.current  = performance.now()
@@ -555,6 +576,19 @@ export default function TestScreen() {
           endTrial()
         } else {
           setPaused(false)
+
+          // Fixation lost mid-test → halt on the current point until the
+          // clinician re-centers the patient and presses to continue
+          if (
+            eyeTrackingRef.current &&
+            !state.is_fixating &&
+            !fixationPausedRef.current &&
+            !calibratingRef.current
+          ) {
+            fixationPausedRef.current = true
+            setFixationPaused(true)
+            endTrial()
+          }
         }
       } catch (err) {
         console.error('Poll error:', err)
@@ -562,13 +596,14 @@ export default function TestScreen() {
     }
 
     poll()
-    const interval = setInterval(poll, 1000)
+    // 500ms so a fixation loss halts the test quickly (was 1s)
+    const interval = setInterval(poll, 500)
     return () => clearInterval(interval)
   }, [started, runId, authFetch, endTrial])
 
-  // ── Gaze polling during overlay ───────────────────────────────────────────
+  // ── Gaze polling during overlay / fixation pause ──────────────────────────
   useEffect(() => {
-    if (!overlay || !runId) return
+    if ((!overlay && !fixationPaused) || !runId) return
 
     async function pollGaze() {
       try {
@@ -579,13 +614,55 @@ export default function TestScreen() {
         if (state.gaze_x != null && state.gaze_y != null) {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
+        if (state.tracker) setTracker(state.tracker)
+        setFaceDetected(state.raw_h != null)
       } catch { }
     }
 
     pollGaze()
     const interval = setInterval(pollGaze, 300)
     return () => clearInterval(interval)
-  }, [overlay, runId, authFetch])
+  }, [overlay, fixationPaused, runId, authFetch])
+
+  // ── Fixation pause: clinician continues with Space/Enter/click ────────────
+  useEffect(() => {
+    if (!fixationPaused) return
+
+    function resume() {
+      fixationPausedRef.current = false
+      setFixationPaused(false)
+      // Small delay so a stray second press can't register as a false
+      // "seen" on the repeated trial
+      setTimeout(() => {
+        if (fixationPausedRef.current) return
+        const point = DEFAULT_POINTS[currentPointIndexRef.current]
+        if (!point) return
+        if (point.point_type === 'static') {
+          runStaticTrialRef.current?.(point)
+        } else {
+          runKineticTrialRef.current?.(point)
+        }
+      }, 400)
+    }
+
+    function onKey(e) {
+      if (e.code !== 'Space' && e.code !== 'Enter') return
+      e.preventDefault()
+      e.stopPropagation()
+      resume()
+    }
+    function onMouse(e) {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      resume()
+    }
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('mousedown', onMouse, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('mousedown', onMouse, true)
+    }
+  }, [fixationPaused])
 
   // ── Commands ──────────────────────────────────────────────────────────────
   const sendCommand = useCallback(async (command) => {
@@ -595,6 +672,23 @@ export default function TestScreen() {
       body: JSON.stringify({ command }),
     })
   }, [runId, authFetch])
+
+  // ── Eye tracking toggle — starts/stops the MediaPipe process ─────────────
+  async function handleToggleEyeTracking() {
+    const next = !eyeTracking
+    setEyeTracking(next)
+    eyeTrackingRef.current = next
+    localStorage.setItem('perivue_eye_tracking', next ? 'on' : 'off')
+
+    if (!runId) return
+    try {
+      await authFetch(
+        `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/${next ? 'start' : 'stop'}/`,
+        { method: 'POST' }
+      )
+    } catch { /* non-fatal — the status line will show the tracker state */ }
+    if (!next) setTracker({ running: false, camera_ok: null })
+  }
 
   // ── Gaze calibration ──────────────────────────────────────────────────────
   // Resolves when the patient presses Space/Enter or clicks (same response
@@ -621,12 +715,23 @@ export default function TestScreen() {
     })
   }
 
-  // Sample raw iris ratios from the state endpoint: 5 reads at 200ms
-  // intervals, skip nulls (no face), need at least 3 to accept.
+  // Sample raw iris ratios from the state endpoint: 8 reads at 150ms
+  // intervals, skip nulls (no face), need at least 4 to accept. The tracker
+  // is shaky even on a still eye, so use the median — one blink or landmark
+  // spike can't drag the calibration point the way a mean would.
+  function median(values) {
+    const sorted = [...values].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  }
+
   async function sampleIrisRatios() {
+    // Let the head/eyes settle after the button press before sampling
+    await new Promise(r => setTimeout(r, 300))
+
     const hs = []
     const vs = []
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       try {
         const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
         if (res.ok) {
@@ -637,13 +742,10 @@ export default function TestScreen() {
           }
         }
       } catch { /* failed read — counts as a skipped sample */ }
-      await new Promise(r => setTimeout(r, 200))
+      await new Promise(r => setTimeout(r, 150))
     }
-    if (hs.length < 3) return null
-    return {
-      h: hs.reduce((a, b) => a + b, 0) / hs.length,
-      v: vs.reduce((a, b) => a + b, 0) / vs.length,
-    }
+    if (hs.length < 4) return null
+    return { h: median(hs), v: median(vs) }
   }
 
   // Show the 5 dots in order, sample the patient's iris ratios at each, and
@@ -725,8 +827,11 @@ export default function TestScreen() {
     setOverlay(false)
 
     // Calibrate first — pause/resume never comes back through here,
-    // so a run is only ever calibrated once
-    await runCalibration()
+    // so a run is only ever calibrated once. Skipped entirely when the
+    // clinician disabled eye tracking.
+    if (eyeTrackingRef.current) {
+      await runCalibration()
+    }
 
     setStarted(true)
 
@@ -756,7 +861,8 @@ export default function TestScreen() {
   }
 
   async function handleDoubleClick() {
-    if (calibratingRef.current) return   // no pausing mid-calibration
+    if (calibratingRef.current) return    // no pausing mid-calibration
+    if (fixationPausedRef.current) return // resume handles the clicks here
     await sendCommand('pause')
     setOverlay(true)
     setPaused(true)
@@ -820,11 +926,25 @@ export default function TestScreen() {
       )}
 
       {/* Fixation warning */}
-      {!isFixating && started && !overlay && (
+      {!isFixating && started && !overlay && eyeTracking && !fixationPaused && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20
           px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/30
           text-red-400 text-xs font-medium pointer-events-none">
           Look at the center
+        </div>
+      )}
+
+      {/* Fixation-loss pause — clinician continues with Space/Enter/click */}
+      {fixationPaused && !overlay && (
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 z-20
+          flex flex-col items-center gap-1.5 px-6 py-3.5 rounded-2xl
+          bg-red-500/10 border border-red-500/25 pointer-events-none">
+          <p className="text-red-400 text-sm font-medium">
+            Fixation lost — ask the patient to look at the center
+          </p>
+          <p className="text-white/40 text-xs">
+            Test paused · press Space / Enter or click to continue
+          </p>
         </div>
       )}
 
@@ -875,6 +995,48 @@ export default function TestScreen() {
                 No run ID — go back and start a session
               </p>
             )}
+
+            {/* Eye tracking toggle + camera status — settings before Begin test */}
+            {!paused && (
+              <div className="flex flex-col items-center gap-1.5 mb-1">
+                <button
+                  onClick={handleToggleEyeTracking}
+                  className="flex items-center gap-2.5 px-4 py-2 rounded-xl
+                    bg-white/5 border border-white/10
+                    hover:bg-white/10 transition-all"
+                >
+                  <span className="text-white/50 text-xs font-medium">Eye tracking</span>
+                  <span className={`relative w-9 h-5 rounded-full transition-colors
+                    ${eyeTracking ? 'bg-emerald-500/60' : 'bg-white/15'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white
+                      transition-all ${eyeTracking ? 'left-[18px]' : 'left-0.5'}`} />
+                  </span>
+                </button>
+
+                {!eyeTracking && (
+                  <p className="text-white/30 text-xs">
+                    Off — the test will run without fixation monitoring or calibration
+                  </p>
+                )}
+                {eyeTracking && !tracker.running && (
+                  <p className="text-amber-400/80 text-xs">
+                    Eye tracker not running
+                  </p>
+                )}
+                {eyeTracking && tracker.running && tracker.camera_ok === false && (
+                  <p className="text-red-400 text-xs text-center max-w-md">
+                    Camera feed is black — give camera access to the app running Django
+                    (System Settings → Privacy &amp; Security → Camera), then restart it
+                  </p>
+                )}
+                {eyeTracking && tracker.running && tracker.camera_ok !== false && (
+                  <p className={`text-xs ${faceDetected ? 'text-emerald-400/90' : 'text-amber-400/80'}`}>
+                    {faceDetected ? 'Camera OK — face detected' : 'Camera OK — no face detected'}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               {paused ? (
                 <button

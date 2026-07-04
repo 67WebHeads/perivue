@@ -16,6 +16,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 import subprocess
 import sys
 import os
+import time
 
 from .models import (
     TestProtocol,
@@ -36,6 +37,21 @@ from .serializers import (
 )
 
 _mediapipe_process = None
+
+# In-memory tracker health per run (like _mediapipe_process, this assumes the
+# single-process dev server): run_id -> {"camera_ok": bool|None, "last_seen": epoch}.
+# Written by FixationStatusView on every runner POST, read by RunStateView so
+# the canvas can show camera status before the test starts.
+_tracker_status = {}
+TRACKER_STALE_SECS = 3.0
+# The calibrated verdict only flips to LOST after the gaze has been outside
+# the fixation window this long — mirrors the runner's own 0.5s debounce so
+# landmark jitter doesn't flicker the verdict while the patient holds still
+FIXATION_GRACE_SECS = 0.5
+# Half-width of the calibrated fixation window (screen fractions from center).
+# The calibration corner dots sit 0.25 off-center, so 0.12 means glancing even
+# halfway toward a corner counts as looking away; raise if it false-triggers.
+FIXATION_WINDOW = 0.12
 
 
 class MediaPipeStartView(APIView):
@@ -219,7 +235,15 @@ class RunStateView(APIView):
             TestRun.objects.select_related("session__protocol"),
             pk=pk,
         )
-        return Response(TestRunStateSerializer(run).data)
+        data = TestRunStateSerializer(run).data
+
+        tracker = _tracker_status.get(str(pk))
+        if tracker and time.time() - tracker.get("last_seen", 0) <= TRACKER_STALE_SECS:
+            data["tracker"] = {"running": True, "camera_ok": tracker.get("camera_ok")}
+        else:
+            data["tracker"] = {"running": False, "camera_ok": None}
+
+        return Response(data)
 
 
 class RunCommandView(APIView):
@@ -466,7 +490,10 @@ def _apply_calibration(calibration, raw_h, raw_v):
         gaze_x = max(0.0, min(1.0, gaze_x))
         gaze_y = max(0.0, min(1.0, gaze_y))
 
-        fixating = abs(gaze_x - 0.5) <= 0.20 and abs(gaze_y - 0.5) <= 0.20
+        fixating = (
+            abs(gaze_x - 0.5) <= FIXATION_WINDOW
+            and abs(gaze_y - 0.5) <= FIXATION_WINDOW
+        )
         return gaze_x, gaze_y, fixating
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
@@ -540,6 +567,12 @@ class FixationStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        now = time.time()
+        camera_ok = request.data.get("camera_ok")
+        tracker = _tracker_status.setdefault(str(run_pk), {})
+        tracker["camera_ok"] = bool(camera_ok) if camera_ok is not None else None
+        tracker["last_seen"] = now
+
         # If the run is calibrated, override the runner's verdict using the
         # raw iris ratios; on degenerate/malformed calibration keep the
         # runner's own is_fixating.
@@ -549,6 +582,16 @@ class FixationStatusView(APIView):
             if mapped is not None:
                 gaze_x, gaze_y, is_fixating = mapped
                 calibrated = True
+
+                # Debounce: brief excursions outside the window are jitter,
+                # not a real fixation break
+                if is_fixating:
+                    tracker["outside_since"] = None
+                else:
+                    if tracker.get("outside_since") is None:
+                        tracker["outside_since"] = now
+                    if now - tracker["outside_since"] < FIXATION_GRACE_SECS:
+                        is_fixating = True
 
         was_fixating = run.is_fixating
         run.is_fixating = is_fixating

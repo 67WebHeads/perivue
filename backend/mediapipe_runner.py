@@ -25,6 +25,26 @@ args = parser.parse_args()
 
 API_URL = f"{args.api}/api/visual-tests/runs/{args.run_id}/fixation/"
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mediapipe.log")
+# Some cameras (iPhone Continuity Camera, some webcam drivers) deliver
+# pre-mirrored frames, which inverts left/right. Press F in the preview to
+# flip; the choice persists here for future runs.
+FLIP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".mediapipe_flip")
+
+
+def load_flip():
+    try:
+        with open(FLIP_FILE) as f:
+            return f.read().strip() != "0"
+    except Exception:
+        return True  # default: mirror the frame (normal webcam)
+
+
+def save_flip(value):
+    try:
+        with open(FLIP_FILE, "w") as f:
+            f.write("1" if value else "0")
+    except Exception:
+        pass
 
 
 def log(msg):
@@ -71,20 +91,70 @@ def get_iris_ratio(landmarks, inner_idx, outer_idx, iris_idx, img_w, img_h):
     return (iris_x - min(inner_x, outer_x)) / eye_width
 
 
-def get_iris_ratio_vertical(landmarks, upper_idx, lower_idx, iris_idx, img_w, img_h):
+# Vertical iris movement is only a few % of eye width — scale it up so the
+# usable range maps to roughly 0-1 like the horizontal ratio
+V_SCALE = 5.0
+# Second downward cue: the upper lid follows the iris when looking down, so
+# lid droop below the person's own baseline pushes the signal down (and
+# wide-open lids when looking up push it up). Downward iris travel alone is
+# small and partly occluded by the lid, which is why the gaze dot barely
+# followed it.
+OPENNESS_GAIN = 1.2
+# Anatomy differs per person (natural lid openness, iris height vs the eye
+# corners), so absolute ratios are meaningless — the first ~1s of face frames
+# defines this person's "center" and everything is reported relative to it.
+BASELINE_FRAMES = 30
+
+
+def get_iris_ratio_vertical(
+    landmarks, inner_idx, outer_idx, upper_idx, lower_idx, iris_idx, img_w, img_h
+):
+    """
+    Vertical gaze signal, ~0.5 = center, larger = looking further down.
+    Combines two cues:
+      - iris position relative to the eye-corner line (corners don't move
+        with gaze, unlike the eyelids the old ratio measured against)
+      - lid openness relative to nominal (lids droop when looking down,
+        widen when looking up)
+    """
+    inner = landmarks[inner_idx]
+    outer = landmarks[outer_idx]
     upper = landmarks[upper_idx]
     lower = landmarks[lower_idx]
     iris = landmarks[iris_idx]
 
-    upper_y = upper.y * img_h
-    lower_y = lower.y * img_h
-    iris_y = iris.y * img_h
-
-    eye_height = abs(lower_y - upper_y)
-    if eye_height < 1:
+    eye_width = abs((outer.x - inner.x) * img_w)
+    if eye_width < 1:
         return 0.5
 
-    return (iris_y - min(upper_y, lower_y)) / eye_height
+    corners_mid_y = ((inner.y + outer.y) / 2) * img_h
+    iris_term = V_SCALE * ((iris.y * img_h) - corners_mid_y) / eye_width
+
+    openness = abs((lower.y - upper.y) * img_h) / eye_width
+    lid_term = -OPENNESS_GAIN * openness
+
+    # Raw signal — offset is arbitrary per person; the startup baseline
+    # re-centers it to 0.5
+    return iris_term + lid_term
+
+
+def eye_openness(landmarks, inner_idx, outer_idx, upper_idx, lower_idx, img_w, img_h):
+    """Lid gap relative to eye width — near 0 when the eye is shut."""
+    inner = landmarks[inner_idx]
+    outer = landmarks[outer_idx]
+    upper = landmarks[upper_idx]
+    lower = landmarks[lower_idx]
+
+    eye_width = abs((outer.x - inner.x) * img_w)
+    if eye_width < 1:
+        return 0.0
+    return abs((lower.y - upper.y) * img_h) / eye_width
+
+
+def is_blinking(landmarks, img_w, img_h):
+    left = eye_openness(landmarks, LEFT_INNER, LEFT_OUTER, 159, 145, img_w, img_h)
+    right = eye_openness(landmarks, RIGHT_INNER, RIGHT_OUTER, 386, 374, img_w, img_h)
+    return left < BLINK_OPENNESS or right < BLINK_OPENNESS
 
 
 def get_ratios(landmarks, img_w, img_h):
@@ -93,16 +163,19 @@ def get_ratios(landmarks, img_w, img_h):
     right_h = get_iris_ratio(
         landmarks, RIGHT_INNER, RIGHT_OUTER, RIGHT_IRIS, img_w, img_h
     )
-    left_v = get_iris_ratio_vertical(landmarks, 159, 145, LEFT_IRIS, img_w, img_h)
-    right_v = get_iris_ratio_vertical(landmarks, 386, 374, RIGHT_IRIS, img_w, img_h)
+    left_v = get_iris_ratio_vertical(
+        landmarks, LEFT_INNER, LEFT_OUTER, 159, 145, LEFT_IRIS, img_w, img_h
+    )
+    right_v = get_iris_ratio_vertical(
+        landmarks, RIGHT_INNER, RIGHT_OUTER, 386, 374, RIGHT_IRIS, img_w, img_h
+    )
     return left_h, right_h, left_v, right_v
 
 
 # ── Fixation detection (uncalibrated fallback) ────────────────────────────────
-def is_fixating(left_h, right_h, left_v, right_v):
-    h_ok = (0.35 <= left_h <= 0.65) and (0.35 <= right_h <= 0.65)
-    v_ok = (0.30 <= left_v <= 0.70) and (0.30 <= right_v <= 0.70)
-    return h_ok and v_ok
+def is_fixating(avg_h, avg_v):
+    """Baseline-adjusted averages: 0.5 = this person's center gaze."""
+    return (0.35 <= avg_h <= 0.65) and (0.30 <= avg_v <= 0.70)
 
 
 # ── Gaze estimation (uncalibrated fallback) ───────────────────────────────────
@@ -210,7 +283,15 @@ def open_camera(forced_index):
 cap = open_camera(args.camera)
 
 BAD_THRESHOLD_SECS = 0.5
-EMA_ALPHA = 0.3
+# Iris landmarks jitter frame-to-frame even when the eye is still — keep the
+# EMA heavy (low alpha) so the streamed ratios are stable enough to calibrate
+# against; the added lag is fine since dots are stared at for ~1s.
+EMA_ALPHA = 0.12
+# Below this lid-gap/eye-width ratio the eye counts as closed and the frame
+# is skipped (last good ratios/gaze held). Kept low on purpose: looking DOWN
+# also droops the lids (~0.10-0.15 openness), and that must keep tracking —
+# only a near-full closure (a real blink, ~0.03-0.06) should freeze.
+BLINK_OPENNESS = 0.10
 
 last_good_time = time.time()
 currently_fixating = True
@@ -222,6 +303,13 @@ gaze_y = 0.5
 ema_h = None
 ema_v = None
 face_detected = False
+# Per-person center reference — median of the first BASELINE_FRAMES clean
+# (face visible, not blinking) frames. Nothing is streamed until it exists.
+baseline_h = None
+baseline_v = None
+baseline_samples = []
+flip_enabled = load_flip()
+log(f"Horizontal flip: {'on' if flip_enabled else 'off'} (press F in preview to toggle)")
 black_feed_warned = False
 last_black_check = 0
 feed_is_black = False
@@ -241,7 +329,8 @@ with mp_face_mesh.FaceMesh(
             print("Failed to read frame.")
             continue
 
-        frame = cv2.flip(frame, 1)
+        if flip_enabled:
+            frame = cv2.flip(frame, 1)
         img_h, img_w = frame.shape[:2]
 
         now = time.time()
@@ -260,24 +349,54 @@ with mp_face_mesh.FaceMesh(
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
 
+        blinking = False
         if results.multi_face_landmarks:
             landmarks = results.multi_face_landmarks[0].landmark
-            left_h, right_h, left_v, right_v = get_ratios(landmarks, img_w, img_h)
-            fixating = is_fixating(left_h, right_h, left_v, right_v)
+            blinking = is_blinking(landmarks, img_w, img_h)
 
-            avg_h = (left_h + right_h) / 2
-            avg_v = (left_v + right_v) / 2
-            ema_h = avg_h if ema_h is None else EMA_ALPHA * avg_h + (1 - EMA_ALPHA) * ema_h
-            ema_v = avg_v if ema_v is None else EMA_ALPHA * avg_v + (1 - EMA_ALPHA) * ema_v
-            gaze_x, gaze_y = estimate_gaze(ema_h, ema_v)
-            face_detected = True
-
-            if fixating:
-                last_good_time = now
-                currently_fixating = True
-            else:
+            if blinking:
+                # Eye closed — the ratios are meaningless. Hold the last good
+                # EMA/gaze so the calibration samples and the streamed values
+                # don't spike. A closure longer than BAD_THRESHOLD_SECS still
+                # goes LOST because last_good_time isn't refreshed.
+                face_detected = ema_h is not None
                 if now - last_good_time >= BAD_THRESHOLD_SECS:
                     currently_fixating = False
+            else:
+                left_h, right_h, left_v, right_v = get_ratios(landmarks, img_w, img_h)
+                raw_h_frame = (left_h + right_h) / 2
+                raw_v_frame = (left_v + right_v) / 2
+
+                if baseline_h is None:
+                    # Still learning this person's center — collect, don't stream
+                    baseline_samples.append((raw_h_frame, raw_v_frame))
+                    if len(baseline_samples) >= BASELINE_FRAMES:
+                        hs = sorted(s[0] for s in baseline_samples)
+                        vs = sorted(s[1] for s in baseline_samples)
+                        baseline_h = hs[len(hs) // 2]
+                        baseline_v = vs[len(vs) // 2]
+                        log(
+                            f"Center baseline captured: "
+                            f"h={baseline_h:.3f} v={baseline_v:.3f}"
+                        )
+                    face_detected = False
+                    last_good_time = now
+                else:
+                    avg_h = 0.5 + (raw_h_frame - baseline_h)
+                    avg_v = 0.5 + (raw_v_frame - baseline_v)
+                    fixating = is_fixating(avg_h, avg_v)
+
+                    ema_h = avg_h if ema_h is None else EMA_ALPHA * avg_h + (1 - EMA_ALPHA) * ema_h
+                    ema_v = avg_v if ema_v is None else EMA_ALPHA * avg_v + (1 - EMA_ALPHA) * ema_v
+                    gaze_x, gaze_y = estimate_gaze(ema_h, ema_v)
+                    face_detected = True
+
+                    if fixating:
+                        last_good_time = now
+                        currently_fixating = True
+                    else:
+                        if now - last_good_time >= BAD_THRESHOLD_SECS:
+                            currently_fixating = False
         else:
             face_detected = False
             if now - last_good_time >= BAD_THRESHOLD_SECS:
@@ -294,6 +413,8 @@ with mp_face_mesh.FaceMesh(
                     # during calibration; null when no face is detected
                     "raw_h": round(ema_h, 4) if face_detected and ema_h is not None else None,
                     "raw_v": round(ema_v, 4) if face_detected and ema_v is not None else None,
+                    # Lets the canvas show camera health before the test starts
+                    "camera_ok": not feed_is_black,
                 }
             )
             if posted:
@@ -345,11 +466,11 @@ with mp_face_mesh.FaceMesh(
         )
         cv2.putText(
             frame,
-            f"Gaze: ({disp_gx:.2f}, {disp_gy:.2f})",
+            f"Gaze: ({disp_gx:.2f}, {disp_gy:.2f})" + ("  BLINK" if blinking else ""),
             (20, 80),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            (200, 200, 200),
+            (0, 200, 255) if blinking else (200, 200, 200),
             1,
         )
         if feed_is_black:
@@ -362,9 +483,20 @@ with mp_face_mesh.FaceMesh(
                 (0, 0, 255),
                 2,
             )
+        elif baseline_h is None:
+            cv2.putText(
+                frame,
+                f"LEARNING CENTER BASELINE - look at the screen center "
+                f"({len(baseline_samples)}/{BASELINE_FRAMES})",
+                (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 200, 255),
+                2,
+            )
         cv2.putText(
             frame,
-            f"Run: {args.run_id[:8]}...",
+            f"Run: {args.run_id[:8]}...   [F] flip left/right   [Q] quit",
             (20, img_h - 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -373,8 +505,23 @@ with mp_face_mesh.FaceMesh(
         )
 
         cv2.imshow("PeriVue Eye Tracker", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             break
+        if key == ord("f"):
+            flip_enabled = not flip_enabled
+            save_flip(flip_enabled)
+            # Horizontal geometry just changed — relearn this person's center
+            baseline_h = None
+            baseline_v = None
+            baseline_samples = []
+            ema_h = None
+            ema_v = None
+            log(
+                f"Horizontal flip toggled {'on' if flip_enabled else 'off'} — "
+                f"re-learning baseline. If a calibration was saved for this "
+                f"run, restart the run and calibrate again."
+            )
 
 cap.release()
 cv2.destroyAllWindows()
