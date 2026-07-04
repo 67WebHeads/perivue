@@ -8,6 +8,46 @@ import GroupIcon from "@mui/icons-material/Group";
 import LogoutIcon from "@mui/icons-material/Logout";
 import TrackChangesIcon from "@mui/icons-material/TrackChanges";
 
+function getInitials(name = "", email = "") {
+  const source = name.trim() || email.trim();
+  if (!source) return "?";
+
+  return source
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function UserAvatar({ user }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const avatarUrl = user?.avatar_url?.trim();
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
+  if (avatarUrl && !imageFailed) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={user?.full_name ? `${user.full_name} avatar` : "User avatar"}
+        referrerPolicy="no-referrer"
+        onError={() => setImageFailed(true)}
+        className="w-8 h-8 rounded-full object-cover border border-white/20 bg-white/10"
+      />
+    );
+  }
+
+  return (
+    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-medium border border-white/10">
+      {getInitials(user?.full_name, user?.email)}
+    </div>
+  );
+}
+
 function Layout() {
   const [isOpen, setIsOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -68,13 +108,7 @@ function Layout() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm opacity-80">{user?.full_name ?? "—"}</span>
-            {user?.avatar_url ? (
-              <img src={user.avatar_url} alt="avatar" className="w-8 h-8 rounded-full object-cover" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-medium">
-                {user?.full_name?.split(" ").map((n) => n[0]).slice(0, 2).join("") ?? "?"}
-              </div>
-            )}
+            <UserAvatar user={user} />
           </div>
         </div>
 
