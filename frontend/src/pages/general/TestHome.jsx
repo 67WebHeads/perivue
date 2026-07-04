@@ -220,15 +220,18 @@ export default function TestHome() {
       if (!runRes.ok) throw new Error("Failed to create run");
       const run = await runRes.json();
 
-      // Step 3 — launch MediaPipe
-      try {
-        await authFetch(
-          `${API_BASE_URL}/api/visual-tests/runs/${run.id}/mediapipe/start/`,
-          { method: 'POST' }
-        )
-      } catch {
-        // Non-fatal — test can continue without eye tracking
-        console.warn('MediaPipe could not be started')
+      // Step 3 — launch MediaPipe (unless eye tracking is toggled off on
+      // the test canvas — the toggle there can also start it later)
+      if (localStorage.getItem('perivue_eye_tracking') !== 'off') {
+        try {
+          await authFetch(
+            `${API_BASE_URL}/api/visual-tests/runs/${run.id}/mediapipe/start/`,
+            { method: 'POST' }
+          )
+        } catch {
+          // Non-fatal — test can continue without eye tracking
+          console.warn('MediaPipe could not be started')
+        }
       }
 
       // Step 4 — open canvas

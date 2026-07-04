@@ -39,6 +39,12 @@ urlpatterns = [
         views.TrialResultBatchView.as_view(),
         name="run-submit-batch",
     ),
+    # Gaze calibration — canvas POSTs the 5 sampled points before the trials
+    path(
+        "runs/<uuid:pk>/calibrate/",
+        views.RunCalibrationView.as_view(),
+        name="run-calibrate",
+    ),
     # Fixation — called by MediaPipe script
     path(
         "runs/<uuid:run_pk>/fixation/",

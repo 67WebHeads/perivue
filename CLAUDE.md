@@ -185,6 +185,8 @@ GET    /api/visual-tests/runs/<uuid>/state/             # Poll run state (canvas
 POST   /api/visual-tests/runs/<uuid>/command/           # Clinician command (pause|resume|next|repeat|end|abort)
 GET    /api/visual-tests/runs/<uuid>/results/           # Get all trial results for a run
 POST   /api/visual-tests/runs/<uuid>/submit/            # Submit trial result (canvas calls after each stimulus)
+POST   /api/visual-tests/runs/<uuid>/calibrate/         # Save 5-point gaze calibration ({points:[{sx,sy,h,v} x5]})
+DELETE /api/visual-tests/runs/<uuid>/calibrate/         # Clear gaze calibration
 POST   /api/visual-tests/runs/<uuid>/fixation/          # MediaPipe POSTs fixation status (no auth)
 ```
 
@@ -264,6 +266,8 @@ The actual execution — one per eye. This is what the canvas polls.
 - session (FK), eye ('OD' | 'OS')
 - status: pending / in_progress / paused / completed / aborted
 - current_point_index, fixation_loss_count, is_fixating
+- gaze_x, gaze_y (latest gaze), raw_h, raw_v (latest EMA-smoothed iris ratios, null when no face)
+- gaze_calibration (JSON — 5-point per-run calibration; when set, the fixation endpoint overrides the runner's verdict)
 - start_time, end_time
 
 ### TrialResult (visual_tests app)
