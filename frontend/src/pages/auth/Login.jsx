@@ -10,17 +10,22 @@ function Login() {
   const [error, setError]         = useState("");
   const [loading, setLoading]     = useState(false);
 
-  const { login } = useAuth();
+  const { login, resetSessionExpired } = useAuth();
   const navigate  = useNavigate();
   const location  = useLocation();
 
   const from = location.state?.from?.pathname || "/dashboard";
+  const expiredNotice = location.state?.sessionExpired
+    ? "Your session expired. Please sign in again."
+    : "";
 
   const handleGoogleLogin = () => {
+    resetSessionExpired();
     window.location.href = `${API_BASE_URL}/accounts/google/login/`;
   };
 
   const handleTestLogin = async () => {
+    resetSessionExpired();
     setError("");
     setLoading(true);
     try {
@@ -72,6 +77,12 @@ function Login() {
           <GoogleIcon fontSize="small" />
           <span>Sign in with Google</span>
         </button>
+
+        {expiredNotice && (
+          <p className="w-full rounded-xl border border-yellow-400/25 bg-yellow-400/10 px-4 py-2 text-center text-xs text-yellow-200">
+            {expiredNotice}
+          </p>
+        )}
 
         {import.meta.env.DEV && (
           <div className="flex flex-col items-center space-y-2 border-t border-white/20 pt-4 w-full">
