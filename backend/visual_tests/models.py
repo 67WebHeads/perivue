@@ -121,6 +121,14 @@ class TestRun(models.Model):
     gaze_x = models.FloatField(blank=True, null=True)
     gaze_y = models.FloatField(blank=True, null=True)
     trials = models.JSONField(default=list, blank=True)
+    # Latest EMA-smoothed iris ratios streamed by mediapipe_runner.py
+    # (null when no face is detected)
+    raw_h = models.FloatField(blank=True, null=True)
+    raw_v = models.FloatField(blank=True, null=True)
+    # Per-patient 5-point gaze calibration:
+    # {"points": [{"sx", "sy", "h", "v"} x5]} — sx/sy are dot screen
+    # fractions, h/v the mean iris ratios sampled while staring at that dot
+    gaze_calibration = models.JSONField(blank=True, null=True)
 
     class Meta:
         db_table = "test_runs"

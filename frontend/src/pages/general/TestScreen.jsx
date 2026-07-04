@@ -79,6 +79,16 @@ function buildDefaultPoints() {
 const DEFAULT_POINTS = buildDefaultPoints()
 const TOTAL_POINTS = DEFAULT_POINTS.length  // 40
 
+// ─── Gaze calibration targets (screen fractions, in order) ───────────────────
+// top mid-left, top mid-right, bottom mid-left, bottom mid-right, center
+const CALIBRATION_TARGETS = [
+  [0.25, 0.25],
+  [0.75, 0.25],
+  [0.25, 0.75],
+  [0.75, 0.75],
+  [0.5, 0.5],
+]
+
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
 
 function drawGrid(canvas) {
@@ -165,9 +175,10 @@ function drawDot(canvas, meta, xDeg, yDeg, color = 'white', sizeDeg = 0.5) {
   ctx.fill()
 }
 
-function drawCalibrationDot(canvas, meta, pulse) {
+function drawCalibrationDot(canvas, sx, sy, pulse) {
   const ctx = canvas.getContext('2d')
-  const { cx, cy } = meta
+  const cx = sx * canvas.width
+  const cy = sy * canvas.height
   const outerR = 6 + pulse * 5
   ctx.beginPath()
   ctx.arc(cx, cy, outerR, 0, Math.PI * 2)
@@ -219,6 +230,10 @@ export default function TestScreen() {
   const [completed,  setCompleted]  = useState(false)
   const [progress,   setProgress]   = useState({ current: 0, total: TOTAL_POINTS })
   const [isFixating, setIsFixating] = useState(true)
+  const [calibMessage, setCalibMessage] = useState('')
+
+  // ── Calibration refs ──────────────────────────────────────────────────────
+  const calibratingRef = useRef(false)
 
   // ── Trial refs ────────────────────────────────────────────────────────────
   const trialActiveRef      = useRef(false)
@@ -273,7 +288,7 @@ export default function TestScreen() {
 
       if (canvasRef.current) {
         gridMeta.current = drawGrid(canvasRef.current)
-        drawCalibrationDot(canvasRef.current, gridMeta.current, pulse)
+        drawCalibrationDot(canvasRef.current, 0.5, 0.5, pulse)
         drawGazeDot(
           canvasRef.current,
           gazePosRef.current.x,
@@ -581,13 +596,138 @@ export default function TestScreen() {
     })
   }, [runId, authFetch])
 
-  function handleStart() {
+  // ── Gaze calibration ──────────────────────────────────────────────────────
+  // Resolves when the patient presses Space/Enter or clicks (same response
+  // button as the test). Capture phase so nothing else swallows the event.
+  function waitForPress() {
+    return new Promise(resolve => {
+      function cleanup() {
+        window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('mousedown', onMouse, true)
+      }
+      function onKey(e) {
+        if (e.code !== 'Space' && e.code !== 'Enter') return
+        e.preventDefault()
+        cleanup()
+        resolve()
+      }
+      function onMouse(e) {
+        if (e.button !== 0) return
+        cleanup()
+        resolve()
+      }
+      window.addEventListener('keydown', onKey, true)
+      window.addEventListener('mousedown', onMouse, true)
+    })
+  }
+
+  // Sample raw iris ratios from the state endpoint: 5 reads at 200ms
+  // intervals, skip nulls (no face), need at least 3 to accept.
+  async function sampleIrisRatios() {
+    const hs = []
+    const vs = []
+    for (let i = 0; i < 5; i++) {
+      try {
+        const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
+        if (res.ok) {
+          const state = await res.json()
+          if (state.raw_h != null && state.raw_v != null) {
+            hs.push(state.raw_h)
+            vs.push(state.raw_v)
+          }
+        }
+      } catch { /* failed read — counts as a skipped sample */ }
+      await new Promise(r => setTimeout(r, 200))
+    }
+    if (hs.length < 3) return null
+    return {
+      h: hs.reduce((a, b) => a + b, 0) / hs.length,
+      v: vs.reduce((a, b) => a + b, 0) / vs.length,
+    }
+  }
+
+  // Show the 5 dots in order, sample the patient's iris ratios at each, and
+  // save the calibration. Returns true if calibrated, false if the test
+  // should start uncalibrated.
+  async function runCalibration() {
+    calibratingRef.current = true
+    let animId = null
+    try {
+      const points = []
+
+      for (let i = 0; i < CALIBRATION_TARGETS.length; i++) {
+        const [sx, sy] = CALIBRATION_TARGETS[i]
+
+        // Pulse-animate this target dot until sampling is done
+        let startTime = null
+        function animateDot(timestamp) {
+          if (!startTime) startTime = timestamp
+          const elapsed = (timestamp - startTime) / 1000
+          const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
+          if (canvasRef.current) {
+            gridMeta.current = drawGrid(canvasRef.current)
+            drawCalibrationDot(canvasRef.current, sx, sy, pulse)
+          }
+          animId = requestAnimationFrame(animateDot)
+        }
+        animId = requestAnimationFrame(animateDot)
+
+        let sample = null
+        for (let attempt = 0; attempt < 2 && !sample; attempt++) {
+          setCalibMessage(attempt === 0
+            ? `Stare at the dot, then press Space — ${i + 1} / 5`
+            : 'Face not detected — stare at the dot and press again')
+          await waitForPress()
+          setCalibMessage('Hold still…')
+          sample = await sampleIrisRatios()
+        }
+
+        cancelAnimationFrame(animId)
+        animId = null
+
+        if (!sample) {
+          setCalibMessage('Face not detected — starting test without calibration')
+          await new Promise(r => setTimeout(r, 2500))
+          return false
+        }
+        points.push({ sx, sy, h: sample.h, v: sample.v })
+      }
+
+      const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
+        method: 'POST',
+        body: JSON.stringify({ points }),
+      })
+      if (!res.ok) {
+        console.error('Failed to save calibration:', res.status)
+        setCalibMessage('Could not save calibration — starting test without it')
+        await new Promise(r => setTimeout(r, 2500))
+        return false
+      }
+      return true
+    } catch (err) {
+      console.error('Calibration error:', err)
+      return false
+    } finally {
+      if (animId) cancelAnimationFrame(animId)
+      calibratingRef.current = false
+      setCalibMessage('')
+      if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+    }
+  }
+
+  async function handleStart() {
     if (!runId) return
+    if (calibratingRef.current) return
     // Reset local state for a fresh run
     currentPointIndexRef.current = 0
     pendingTrialsRef.current = []
     setProgress({ current: 1, total: TOTAL_POINTS })
     setOverlay(false)
+
+    // Calibrate first — pause/resume never comes back through here,
+    // so a run is only ever calibrated once
+    await runCalibration()
+
     setStarted(true)
 
     // Kick off the first point immediately
@@ -616,6 +756,7 @@ export default function TestScreen() {
   }
 
   async function handleDoubleClick() {
+    if (calibratingRef.current) return   // no pausing mid-calibration
     await sendCommand('pause')
     setOverlay(true)
     setPaused(true)
@@ -666,6 +807,15 @@ export default function TestScreen() {
           px-4 py-1.5 rounded-full bg-white/5 border border-white/10
           text-white/30 text-xs font-mono pointer-events-none">
           {progress.current} / {progress.total}
+        </div>
+      )}
+
+      {/* Calibration caption */}
+      {calibMessage && !overlay && (
+        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20
+          px-5 py-2.5 rounded-xl bg-white/5 border border-white/10
+          text-white/70 text-sm font-medium pointer-events-none">
+          {calibMessage}
         </div>
       )}
 

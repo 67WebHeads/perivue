@@ -426,6 +426,100 @@ class TrialResultListView(APIView):
         return Response(run.trials or [])
 
 
+# ─── Gaze calibration ─────────────────────────────────────────────────────────
+
+
+def _apply_calibration(calibration, raw_h, raw_v):
+    """
+    Map raw iris ratios to screen fractions using the run's 5-point
+    calibration. Returns (gaze_x, gaze_y, is_fixating) or None if the
+    calibration is malformed or degenerate (fall back to the runner's verdict).
+    """
+    try:
+        points = calibration.get("points") or []
+        if len(points) != 5:
+            return None
+
+        corners = points[:4]
+        left = [p for p in corners if p["sx"] < 0.5]
+        right = [p for p in corners if p["sx"] > 0.5]
+        top = [p for p in corners if p["sy"] < 0.5]
+        bottom = [p for p in corners if p["sy"] > 0.5]
+        if not (left and right and top and bottom):
+            return None
+
+        h_left = sum(p["h"] for p in left) / len(left)
+        h_right = sum(p["h"] for p in right) / len(right)
+        v_top = sum(p["v"] for p in top) / len(top)
+        v_bottom = sum(p["v"] for p in bottom) / len(bottom)
+        ch = points[4]["h"]
+        cv = points[4]["v"]
+
+        h_span = h_right - h_left
+        v_span = v_bottom - v_top
+        # The left/right (top/bottom) dot pairs are 0.5 of the screen apart
+        if abs(h_span) < 0.02 or abs(v_span) < 0.02:
+            return None
+
+        gaze_x = 0.5 + (raw_h - ch) * 0.5 / h_span
+        gaze_y = 0.5 + (raw_v - cv) * 0.5 / v_span
+        gaze_x = max(0.0, min(1.0, gaze_x))
+        gaze_y = max(0.0, min(1.0, gaze_y))
+
+        fixating = abs(gaze_x - 0.5) <= 0.20 and abs(gaze_y - 0.5) <= 0.20
+        return gaze_x, gaze_y, fixating
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+class RunCalibrationView(APIView):
+    """
+    Saves the 5-point gaze calibration the canvas samples before the trials.
+    Body: {"points": [{sx, sy, h, v} x5]} — sx/sy are dot screen fractions,
+    h/v the mean iris ratios sampled while the patient stared at that dot.
+    DELETE clears the calibration.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        run = get_object_or_404(TestRun, pk=pk)
+
+        points = request.data.get("points")
+        if not isinstance(points, list) or len(points) != 5:
+            return Response(
+                {"error": "points must be a list of exactly 5 items."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cleaned = []
+        for i, p in enumerate(points):
+            try:
+                cleaned.append(
+                    {
+                        "sx": float(p["sx"]),
+                        "sy": float(p["sy"]),
+                        "h": float(p["h"]),
+                        "v": float(p["v"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                return Response(
+                    {"error": f"Point {i}: sx, sy, h and v must all be numeric."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        run.gaze_calibration = {"points": cleaned}
+        run.save(update_fields=["gaze_calibration"])
+        return Response({"ok": True, "calibrated": True})
+
+    def delete(self, request, pk):
+        run = get_object_or_404(TestRun, pk=pk)
+        run.gaze_calibration = None
+        run.save(update_fields=["gaze_calibration"])
+        return Response({"ok": True, "calibrated": False})
+
+
 # ─── Fixation ─────────────────────────────────────────────────────────────────
 
 
@@ -437,6 +531,8 @@ class FixationStatusView(APIView):
         is_fixating = request.data.get("is_fixating")
         gaze_x = request.data.get("gaze_x")
         gaze_y = request.data.get("gaze_y")
+        raw_h = request.data.get("raw_h")
+        raw_v = request.data.get("raw_v")
 
         if is_fixating is None:
             return Response(
@@ -444,22 +540,54 @@ class FixationStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # If the run is calibrated, override the runner's verdict using the
+        # raw iris ratios; on degenerate/malformed calibration keep the
+        # runner's own is_fixating.
+        calibrated = False
+        if run.gaze_calibration and raw_h is not None and raw_v is not None:
+            mapped = _apply_calibration(run.gaze_calibration, raw_h, raw_v)
+            if mapped is not None:
+                gaze_x, gaze_y, is_fixating = mapped
+                calibrated = True
+
+        was_fixating = run.is_fixating
         run.is_fixating = is_fixating
         if not is_fixating:
             run.fixation_loss_count += 1
 
-        # Store latest gaze position
+        # Store latest gaze position + raw iris ratios (null when no face)
         if gaze_x is not None:
             run.gaze_x = gaze_x
         if gaze_y is not None:
             run.gaze_y = gaze_y
+        run.raw_h = raw_h
+        run.raw_v = raw_v
 
         run.save(
-            update_fields=["is_fixating", "fixation_loss_count", "gaze_x", "gaze_y"]
+            update_fields=[
+                "is_fixating",
+                "fixation_loss_count",
+                "gaze_x",
+                "gaze_y",
+                "raw_h",
+                "raw_v",
+            ]
         )
 
-        FixationEvent.objects.create(run=run, is_fixating=is_fixating)
-        return Response({"ok": True})
+        # Only log transitions — one row per POST (5/s) made requests to the
+        # remote Supabase DB take >1s
+        if bool(was_fixating) != bool(is_fixating):
+            FixationEvent.objects.create(run=run, is_fixating=is_fixating)
+
+        return Response(
+            {
+                "ok": True,
+                "is_fixating": bool(is_fixating),
+                "gaze_x": run.gaze_x,
+                "gaze_y": run.gaze_y,
+                "calibrated": calibrated,
+            }
+        )
 
 
 class SessionResultsView(APIView):

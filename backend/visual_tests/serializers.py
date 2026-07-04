@@ -163,6 +163,8 @@ class TestRunStateSerializer(serializers.ModelSerializer):
             "fixation_loss_count",
             "gaze_x",
             "gaze_y",
+            "raw_h",
+            "raw_v",
             "current_point",
             "protocol",
         ]
