@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 
@@ -91,7 +91,7 @@ const CALIBRATION_TARGETS = [
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
 
-function drawGrid(canvas) {
+function drawGrid(canvas, opacity = 1) {
   const ctx = canvas.getContext('2d')
   const W = canvas.width
   const H = canvas.height
@@ -99,6 +99,8 @@ function drawGrid(canvas) {
   const cy = H / 2
   const maxRing = RINGS[RINGS.length - 1]
   const scale = Math.min(W, H) * 0.44 / maxRing
+  const gridOpacity = Math.max(0, Math.min(1, opacity))
+  const white = (alpha) => `rgba(255,255,255,${alpha * gridOpacity})`
 
   ctx.clearRect(0, 0, W, H)
   ctx.fillStyle = '#000'
@@ -108,11 +110,11 @@ function drawGrid(canvas) {
     const px = r * scale
     ctx.beginPath()
     ctx.arc(cx, cy, px, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+    ctx.strokeStyle = white(0.7)
     ctx.lineWidth = r === maxRing ? 2 : 1
     ctx.stroke()
     if (r < maxRing) {
-      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.fillStyle = white(0.7)
       ctx.font = `${Math.max(10, scale * 1.1)}px monospace`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'bottom'
@@ -126,7 +128,7 @@ function drawGrid(canvas) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + outerPx * Math.cos(rad), cy + outerPx * Math.sin(rad))
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+    ctx.strokeStyle = white(0.55)
     ctx.lineWidth = 0.6
     ctx.stroke()
   })
@@ -136,7 +138,7 @@ function drawGrid(canvas) {
     const rad = (angleDeg - 90) * (Math.PI / 180)
     const lx = cx + labelR * Math.cos(rad)
     const ly = cy + labelR * Math.sin(rad)
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.fillStyle = white(0.9)
     ctx.font = `${Math.max(11, scale * 1.3)}px monospace`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -146,7 +148,7 @@ function drawGrid(canvas) {
   const crossAngles = Array.from({ length: 16 }, (_, i) => i * (Math.PI / 8))
   const innerR = scale * 0.5
   const outerR = scale * 1.6
-  ctx.strokeStyle = 'rgba(255,255,255,1.0)'
+  ctx.strokeStyle = white(1.0)
   ctx.lineWidth = 1.2
   crossAngles.forEach(a => {
     ctx.beginPath()
@@ -157,7 +159,7 @@ function drawGrid(canvas) {
 
   ctx.beginPath()
   ctx.arc(cx, cy, 2, 0, Math.PI * 2)
-  ctx.fillStyle = 'white'
+  ctx.fillStyle = white(1.0)
   ctx.fill()
 
   return { cx, cy, scale }
@@ -218,6 +220,7 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
 
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const runId = searchParams.get('run_id')
   const { authFetch } = useAuth()
 
@@ -231,6 +234,9 @@ export default function TestScreen() {
   const [progress,   setProgress]   = useState({ current: 0, total: TOTAL_POINTS })
   const [isFixating, setIsFixating] = useState(true)
   const [calibMessage, setCalibMessage] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [tangentScreenOpacity, setTangentScreenOpacity] = useState(100)
+  const tangentScreenOpacityRef = useRef(100)
 
   // ── Fixation-loss auto-pause ──────────────────────────────────────────────
   // When the (calibrated) gaze leaves the center, the test halts on the
@@ -274,13 +280,26 @@ export default function TestScreen() {
   const runKineticTrialRef = useRef(null)
   const stopMediaPipeRef   = useRef(null)
 
+  function redrawGrid(canvas = canvasRef.current) {
+    if (!canvas) return null
+    gridMeta.current = drawGrid(canvas, tangentScreenOpacityRef.current / 100)
+    return gridMeta.current
+  }
+
+  function handleTangentOpacityChange(e) {
+    const nextOpacity = Number(e.target.value)
+    setTangentScreenOpacity(nextOpacity)
+    tangentScreenOpacityRef.current = nextOpacity
+    redrawGrid()
+  }
+
   // ── Canvas resize ─────────────────────────────────────────────────────────
   function resizeCanvas() {
     const canvas = canvasRef.current
     if (!canvas) return
     canvas.width  = window.innerWidth
     canvas.height = window.innerHeight
-    gridMeta.current = drawGrid(canvas)
+    redrawGrid(canvas)
   }
 
   useEffect(() => {
@@ -293,7 +312,7 @@ export default function TestScreen() {
   useEffect(() => {
     if (!overlay && !fixationPaused) {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
-      if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+      redrawGrid()
       return
     }
 
@@ -304,7 +323,7 @@ export default function TestScreen() {
       const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
 
       if (canvasRef.current) {
-        gridMeta.current = drawGrid(canvasRef.current)
+        redrawGrid()
         drawCalibrationDot(canvasRef.current, 0.5, 0.5, pulse)
         if (eyeTrackingRef.current) {
           drawGazeDot(
@@ -409,7 +428,7 @@ export default function TestScreen() {
       responseWindowRef.current = null
     }
     if (canvasRef.current) {
-      gridMeta.current = drawGrid(canvasRef.current)
+      redrawGrid()
     }
   }, [])
 
@@ -432,7 +451,7 @@ export default function TestScreen() {
       responseWindowRef.current = setTimeout(async () => {
         if (!trialActiveRef.current) return
         trialActiveRef.current = false
-        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+        redrawGrid()
         recordTrial(point, 'not_seen', null)
         await advanceOrFinish()
       }, 2000)
@@ -469,12 +488,12 @@ export default function TestScreen() {
       const yDeg = currentRadius * Math.sin(angleRad)
       kineticPosRef.current = { xDeg, yDeg }
 
-      drawGrid(canvas)
+      redrawGrid(canvas)
       drawDot(canvas, gridMeta.current, xDeg, yDeg, color, sizeDeg)
 
       if (currentRadius <= 0) {
         trialActiveRef.current = false
-        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+        redrawGrid()
         recordTrial(point, 'not_seen', null, null, null)
         kineticPosRef.current = null
         await advanceOrFinish()
@@ -512,7 +531,7 @@ export default function TestScreen() {
       clearTimeout(responseWindowRef.current)
       responseWindowRef.current = null
     }
-    if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+    redrawGrid()
 
     if (point?.point_type === 'kinetic' && pos) {
       recordTrial(
@@ -673,6 +692,17 @@ export default function TestScreen() {
     })
   }, [runId, authFetch])
 
+  async function handleCancelTest() {
+    setCalibMessage('Cancelling test…')
+    try {
+      await sendCommand('abort')
+    } catch { /* still stop tracking and leave the canvas */ }
+    try {
+      await stopMediaPipeRef.current?.()
+    } catch { /* non-fatal */ }
+    navigate('/test-menu', { replace: true })
+  }
+
   // ── Eye tracking toggle — starts/stops the MediaPipe process ─────────────
   async function handleToggleEyeTracking() {
     const next = !eyeTracking
@@ -707,6 +737,7 @@ export default function TestScreen() {
       }
       function onMouse(e) {
         if (e.button !== 0) return
+        if (e.target?.closest?.('[data-calibration-cancel]')) return
         cleanup()
         resolve()
       }
@@ -767,7 +798,7 @@ export default function TestScreen() {
           const elapsed = (timestamp - startTime) / 1000
           const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
           if (canvasRef.current) {
-            gridMeta.current = drawGrid(canvasRef.current)
+            redrawGrid()
             drawCalibrationDot(canvasRef.current, sx, sy, pulse)
           }
           animId = requestAnimationFrame(animateDot)
@@ -813,7 +844,7 @@ export default function TestScreen() {
       if (animId) cancelAnimationFrame(animId)
       calibratingRef.current = false
       setCalibMessage('')
-      if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+      redrawGrid()
     }
   }
 
@@ -900,12 +931,35 @@ export default function TestScreen() {
   }
 
   // ── Main render ───────────────────────────────────────────────────────────
+  // Rollback pin: this used to be always `cursor-none`. Keep cursor visible
+  // during setup/settings so it does not feel broken; hide it during active test.
+  const cursorClass = started && !overlay && !settingsOpen
+    ? 'cursor-none'
+    : 'cursor-auto'
+
   return (
     <div
-      className="relative w-screen h-screen bg-black overflow-hidden cursor-none"
+      className={`relative w-screen h-screen bg-black overflow-hidden ${cursorClass}`}
       onDoubleClick={handleDoubleClick}
     >
       <canvas ref={canvasRef} className="absolute inset-0" />
+
+      {calibMessage && !overlay && !started && (
+        <button
+          type="button"
+          data-calibration-cancel
+          onClick={handleCancelTest}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="absolute left-5 top-4 z-30 flex h-8 w-8 items-center justify-center rounded-full
+            border border-white/12 bg-white/8 text-white/50 cursor-auto
+            hover:bg-red-500/20 hover:border-red-400/30 hover:text-red-200 transition-all"
+          aria-label="Cancel test"
+        >
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
 
       {/* Progress counter */}
       {started && !overlay && progress.total > 0 && (
@@ -967,10 +1021,15 @@ export default function TestScreen() {
             {runId && (
               <span className="text-white/15 text-xs font-mono">{runId.slice(0, 8)}…</span>
             )}
-
-            <button className="w-8 h-8 flex items-center justify-center rounded-full
+            {/* settings button */}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="w-8 h-8 flex items-center justify-center rounded-full
               bg-white/8 border border-white/12 text-white/50
-              hover:text-white hover:bg-white/15 transition-all">
+              hover:text-white hover:bg-white/15 transition-all"
+              aria-label="Open test settings"
+            >
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -1060,6 +1119,66 @@ export default function TestScreen() {
                   Begin test
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm cursor-auto p-4"
+          onClick={() => setSettingsOpen(false)}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/12 bg-[#10101f] p-5 text-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold">Test settings</h2>
+                <p className="mt-1 text-xs text-white/35">
+                  Adjust the projected test display.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full
+                  border border-white/10 bg-white/5 text-white/45
+                  hover:bg-white/10 hover:text-white transition-all"
+                aria-label="Close test settings"
+              >
+                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <label htmlFor="tangent-screen-opacity" className="text-xs font-medium text-white/65">
+                  Tangent screen opacity
+                </label>
+                <span className="min-w-12 rounded-lg bg-white/8 px-2 py-1 text-right text-xs font-mono text-white/55">
+                  {tangentScreenOpacity}%
+                </span>
+              </div>
+              <input
+                id="tangent-screen-opacity"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={tangentScreenOpacity}
+                onChange={handleTangentOpacityChange}
+                className="w-full accent-purple-500"
+              />
+              <div className="mt-2 flex justify-between text-[10px] text-white/25">
+                <span>0%</span>
+                <span>100%</span>
+              </div>
             </div>
           </div>
         </div>
