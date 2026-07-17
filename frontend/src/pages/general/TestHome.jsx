@@ -234,8 +234,8 @@ export default function TestHome() {
         }
       }
 
-      // Step 4 — open canvas
-      window.open(`/test/canvas?run_id=${run.id}`, '_blank')
+      // Step 4 — go to canvas in the same tab
+      navigate(`/test/canvas?run_id=${run.id}`)
 
     } catch (err) {
       setError(err.message);
