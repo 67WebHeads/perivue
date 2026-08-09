@@ -158,6 +158,7 @@ class TestRunStateSerializer(serializers.ModelSerializer):
             "id",
             "session_id",
             "status",
+            "eye",
             "current_point_index",
             "is_fixating",
             "fixation_loss_count",

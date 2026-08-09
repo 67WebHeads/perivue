@@ -234,6 +234,9 @@ export default function TestScreen() {
   const [progress,   setProgress]   = useState({ current: 0, total: TOTAL_POINTS })
   const [isFixating, setIsFixating] = useState(true)
   const [calibMessage, setCalibMessage] = useState('')
+  // Which of the 5 calibration targets is live, and whether it is currently
+  // being sampled — null whenever calibration is not running
+  const [calibStep, setCalibStep] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tangentScreenOpacity, setTangentScreenOpacity] = useState(100)
   const tangentScreenOpacityRef = useRef(100)
@@ -254,6 +257,9 @@ export default function TestScreen() {
   const eyeTrackingRef = useRef(eyeTracking)
   const [tracker, setTracker] = useState({ running: false, camera_ok: null })
   const [faceDetected, setFaceDetected] = useState(false)
+  // Which eye this run tests — the tracker follows only that eye, so the other
+  // one must be occluded before the baseline is taken
+  const [runEye, setRunEye] = useState(null)
 
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
@@ -634,6 +640,7 @@ export default function TestScreen() {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
         if (state.tracker) setTracker(state.tracker)
+        if (state.eye) setRunEye(state.eye)
         setFaceDetected(state.raw_h != null)
       } catch { }
     }
@@ -807,10 +814,12 @@ export default function TestScreen() {
 
         let sample = null
         for (let attempt = 0; attempt < 2 && !sample; attempt++) {
+          setCalibStep({ index: i, sampling: false })
           setCalibMessage(attempt === 0
-            ? `Stare at the dot, then press Space — ${i + 1} / 5`
+            ? 'Stare at the dot, then press Space'
             : 'Face not detected — stare at the dot and press again')
           await waitForPress()
+          setCalibStep({ index: i, sampling: true })
           setCalibMessage('Hold still…')
           sample = await sampleIrisRatios()
         }
@@ -819,6 +828,7 @@ export default function TestScreen() {
         animId = null
 
         if (!sample) {
+          setCalibStep(null)
           setCalibMessage('Face not detected — starting test without calibration')
           await new Promise(r => setTimeout(r, 2500))
           return false
@@ -826,6 +836,7 @@ export default function TestScreen() {
         points.push({ sx, sy, h: sample.h, v: sample.v })
       }
 
+      setCalibStep(null)
       const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
         method: 'POST',
         body: JSON.stringify({ points }),
@@ -836,6 +847,21 @@ export default function TestScreen() {
         await new Promise(r => setTimeout(r, 2500))
         return false
       }
+      // Saving is not the same as being usable: if the patient tracked the
+      // dots with their head instead of their eyes, the readings barely differ
+      // between dots and the mapping gets discarded on every frame. Say so
+      // here rather than letting the run look calibrated when it isn't.
+      const result = await res.json().catch(() => null)
+      if (result && result.usable === false) {
+        console.warn('Calibration too flat to use:', result)
+        setCalibMessage(
+          'Eye movement between the dots was too small to calibrate — ' +
+          'ask the patient to keep their head still and move only their eyes, ' +
+          'then calibrate again. Starting without calibration.'
+        )
+        await new Promise(r => setTimeout(r, 4000))
+        return false
+      }
       return true
     } catch (err) {
       console.error('Calibration error:', err)
@@ -843,6 +869,7 @@ export default function TestScreen() {
     } finally {
       if (animId) cancelAnimationFrame(animId)
       calibratingRef.current = false
+      setCalibStep(null)
       setCalibMessage('')
       redrawGrid()
     }
@@ -970,6 +997,62 @@ export default function TestScreen() {
         </div>
       )}
 
+      {/* Calibration progress. A bare "3 / 5" tells the clinician how much is
+          left but not what is about to happen, so the counter sits next to a
+          small map of the screen with the five target positions on it — the
+          next dot's corner is visible before it appears, which is what you
+          need to be able to direct the patient. */}
+      {calibStep && !overlay && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20
+          flex items-center gap-3.5 px-4 py-2.5 rounded-xl
+          bg-white/5 border border-white/10 pointer-events-none">
+          <div className="relative h-9 w-14 rounded-md border border-white/15 bg-black/30">
+            {CALIBRATION_TARGETS.map(([sx, sy], i) => {
+              const done = i < calibStep.index
+              const current = i === calibStep.index
+              return (
+                <span
+                  key={`${sx}-${sy}`}
+                  className={`absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2
+                    rounded-full transition-all duration-300
+                    ${current
+                      ? calibStep.sampling
+                        ? 'bg-amber-300 ring-2 ring-amber-300/40 scale-150'
+                        : 'bg-red-400 ring-2 ring-red-400/40 scale-150 animate-pulse'
+                      : done
+                        ? 'bg-emerald-400/80'
+                        : 'bg-white/20'}`}
+                  style={{ left: `${sx * 100}%`, top: `${sy * 100}%` }}
+                />
+              )
+            })}
+          </div>
+
+          <div>
+            <div className="text-white/80 text-sm font-medium tabular-nums">
+              Point {calibStep.index + 1} of {CALIBRATION_TARGETS.length}
+            </div>
+            <div className={`text-[11px] ${calibStep.sampling ? 'text-amber-300/80' : 'text-white/35'}`}>
+              {calibStep.sampling ? 'Sampling — hold still' : 'Waiting for Space'}
+            </div>
+          </div>
+
+          <div className="flex gap-1">
+            {CALIBRATION_TARGETS.map(([sx, sy], i) => (
+              <span
+                key={`bar-${sx}-${sy}`}
+                className={`h-1 w-4 rounded-full transition-colors duration-300
+                  ${i < calibStep.index
+                    ? 'bg-emerald-400/70'
+                    : i === calibStep.index
+                      ? 'bg-white/70'
+                      : 'bg-white/15'}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Calibration caption */}
       {calibMessage && !overlay && (
         <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20
@@ -1091,6 +1174,19 @@ export default function TestScreen() {
                 {eyeTracking && tracker.running && tracker.camera_ok !== false && (
                   <p className={`text-xs ${faceDetected ? 'text-emerald-400/90' : 'text-amber-400/80'}`}>
                     {faceDetected ? 'Camera OK — face detected' : 'Camera OK — no face detected'}
+                  </p>
+                )}
+                {/* The tracker learns the patient's centre gaze in its first
+                    second of video and follows only the tested eye, so the
+                    occluder has to be in place before any of that happens */}
+                {eyeTracking && (runEye === 'OD' || runEye === 'OS') && (
+                  <p className="text-white/40 text-xs text-center max-w-md">
+                    Testing the {runEye === 'OD' ? 'right' : 'left'} eye
+                    {' — '}cover the patient&apos;s{' '}
+                    <span className="text-white/70">
+                      {runEye === 'OD' ? 'left' : 'right'} eye
+                    </span>{' '}
+                    before starting, and keep it covered for the whole run
                   </p>
                 )}
               </div>

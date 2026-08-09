@@ -84,8 +84,18 @@ class MediaPipeStartView(APIView):
             )
 
         try:
+            # --eye matters: the patient occludes the other eye, and MediaPipe
+            # happily reports invented landmarks for it. The runner tracks only
+            # the eye named here.
             _mediapipe_process = subprocess.Popen(
-                [sys.executable, script_path, "--run_id", str(run.id)],
+                [
+                    sys.executable,
+                    script_path,
+                    "--run_id",
+                    str(run.id),
+                    "--eye",
+                    run.eye,
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
@@ -453,11 +463,22 @@ class TrialResultListView(APIView):
 # ─── Gaze calibration ─────────────────────────────────────────────────────────
 
 
-def _apply_calibration(calibration, raw_h, raw_v):
+# Smallest usable spread between the left and right (top and bottom)
+# calibration dots. Those dots sit 0.5 of the screen apart, and on this setup a
+# corner-to-corner gaze only moves the iris ratio about 0.04 — so a valid
+# calibration lands near 0.04 and the old 0.02 floor left barely 2x of margin,
+# close enough that a slightly noisy but perfectly good calibration got thrown
+# away and silently fell back to the uncalibrated estimate. This floor only
+# rejects a genuinely collapsed calibration, where the gain would be so large
+# that landmark noise alone would swing the marker across the screen.
+MIN_CALIBRATION_SPAN = 0.01
+
+
+def _calibration_spans(calibration):
     """
-    Map raw iris ratios to screen fractions using the run's 5-point
-    calibration. Returns (gaze_x, gaze_y, is_fixating) or None if the
-    calibration is malformed or degenerate (fall back to the runner's verdict).
+    (h_span, v_span, center_h, center_v) for a 5-point calibration, or None if
+    it is malformed. Spans are the raw-ratio distance between dot pairs that
+    sit half a screen apart; they are what sets the gain.
     """
     try:
         points = calibration.get("points") or []
@@ -476,13 +497,29 @@ def _apply_calibration(calibration, raw_h, raw_v):
         h_right = sum(p["h"] for p in right) / len(right)
         v_top = sum(p["v"] for p in top) / len(top)
         v_bottom = sum(p["v"] for p in bottom) / len(bottom)
-        ch = points[4]["h"]
-        cv = points[4]["v"]
+        return (
+            h_right - h_left,
+            v_bottom - v_top,
+            points[4]["h"],
+            points[4]["v"],
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
-        h_span = h_right - h_left
-        v_span = v_bottom - v_top
-        # The left/right (top/bottom) dot pairs are 0.5 of the screen apart
-        if abs(h_span) < 0.02 or abs(v_span) < 0.02:
+
+def _apply_calibration(calibration, raw_h, raw_v):
+    """
+    Map raw iris ratios to screen fractions using the run's 5-point
+    calibration. Returns (gaze_x, gaze_y, is_fixating) or None if the
+    calibration is malformed or degenerate (fall back to the runner's verdict).
+    """
+    try:
+        spans = _calibration_spans(calibration)
+        if spans is None:
+            return None
+        h_span, v_span, ch, cv = spans
+
+        if abs(h_span) < MIN_CALIBRATION_SPAN or abs(v_span) < MIN_CALIBRATION_SPAN:
             return None
 
         gaze_x = 0.5 + (raw_h - ch) * 0.5 / h_span
@@ -536,9 +573,35 @@ class RunCalibrationView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        run.gaze_calibration = {"points": cleaned}
+        # Report the measured spans back rather than saving in silence. A
+        # calibration too flat to use is otherwise indistinguishable from a
+        # good one: it saves fine, then _apply_calibration quietly discards it
+        # on every frame and the run behaves as if nobody had calibrated.
+        candidate = {"points": cleaned}
+        spans = _calibration_spans(candidate)
+        if spans is None:
+            return Response(
+                {"error": "points must include both left/right and top/bottom dots."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        h_span, v_span, _, _ = spans
+        usable = (
+            abs(h_span) >= MIN_CALIBRATION_SPAN
+            and abs(v_span) >= MIN_CALIBRATION_SPAN
+        )
+
+        run.gaze_calibration = candidate
         run.save(update_fields=["gaze_calibration"])
-        return Response({"ok": True, "calibrated": True})
+        return Response(
+            {
+                "ok": True,
+                "calibrated": usable,
+                "usable": usable,
+                "h_span": round(h_span, 4),
+                "v_span": round(v_span, 4),
+                "min_span": MIN_CALIBRATION_SPAN,
+            }
+        )
 
     def delete(self, request, pk):
         run = get_object_or_404(TestRun, pk=pk)
