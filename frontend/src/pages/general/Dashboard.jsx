@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
+import { cachedFetch } from "../../cache/apiCache";
 
 function StatCard({ title, value, period, trend, icon, loading }) {
   const trendUp = trend > 0;
@@ -157,14 +158,14 @@ export default function Dashboard() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
 
   useEffect(() => {
-    authFetch(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`)
-      .then((r) => r.json())
+    // Stats: 60s TTL — changes after each test but slight staleness is fine
+    cachedFetch(authFetch, `${API_BASE_URL}/api/visual-tests/dashboard/stats/`, { ttl: 60_000 })
       .then(setStats)
       .catch(() => setStats({ total_patients: "—", total_sessions: "—", passing_rate: null }))
       .finally(() => setStatsLoading(false));
 
-    authFetch(`${API_BASE_URL}/api/visual-tests/sessions/`)
-      .then((r) => r.json())
+    // Recent sessions: 2 min TTL — busted in TestHome after a new session is created
+    cachedFetch(authFetch, `${API_BASE_URL}/api/visual-tests/sessions/`, { ttl: 2 * 60_000 })
       .then((data) => {
         const list = Array.isArray(data) ? data : (data.results ?? []);
         setSessions(list.slice(0, 8));
@@ -245,7 +246,6 @@ export default function Dashboard() {
         </div>
         <QuickActions />
       </div>
-
     </div>
   );
 }
