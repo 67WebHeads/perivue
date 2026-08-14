@@ -91,6 +91,15 @@ function buildDefaultPoints() {
 const DEFAULT_POINTS = buildDefaultPoints()
 const TOTAL_POINTS = DEFAULT_POINTS.length  // 40
 
+// Five-point gaze calibration targets in normalized screen coordinates.
+const CALIBRATION_TARGETS = [
+  [0.10, 0.10],
+  [0.90, 0.10],
+  [0.50, 0.50],
+  [0.10, 0.90],
+  [0.90, 0.90],
+]
+
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
 
 function drawGrid(canvas) {
@@ -217,6 +226,30 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+function redrawGrid(canvasRef, gridMeta) {
+  const canvas = canvasRef.current
+  if (!canvas) return
+  gridMeta.current = drawGrid(canvas)
+}
+
+function drawCalibrationTarget(canvas, sx, sy, pulse) {
+  const px = sx * canvas.width
+  const py = sy * canvas.height
+  const outerR = 6 + pulse * 5
+
+  const ctx = canvas.getContext('2d')
+  ctx.beginPath()
+  ctx.arc(px, py, outerR, 0, Math.PI * 2)
+  ctx.strokeStyle = `rgba(255, 80, 80, ${0.3 + pulse * 0.5})`
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(px, py, 4, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255, 80, 80, 0.9)'
+  ctx.fill()
+}
+
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
@@ -231,7 +264,7 @@ export default function TestScreen() {
   const [completed,  setCompleted]  = useState(false)
   const [progress,   setProgress]   = useState({ current: 0, total: TOTAL_POINTS })
   const [isFixating, setIsFixating] = useState(true)
-<<<<<<< Updated upstream
+
   const [calibMessage, setCalibMessage] = useState('')
   // Which of the 5 calibration targets is live, and whether it is currently
   // being sampled — null whenever calibration is not running
@@ -262,8 +295,7 @@ export default function TestScreen() {
 
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
-=======
->>>>>>> Stashed changes
+
 
   // ── Trial refs ────────────────────────────────────────────────────────────
   const trialActiveRef      = useRef(false)
@@ -609,12 +641,11 @@ export default function TestScreen() {
         if (state.gaze_x != null && state.gaze_y != null) {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
         }
-<<<<<<< Updated upstream
+
         if (state.tracker) setTracker(state.tracker)
         if (state.eye) setRunEye(state.eye)
         setFaceDetected(state.raw_h != null)
-=======
->>>>>>> Stashed changes
+
       } catch { }
     }
 
@@ -632,171 +663,38 @@ export default function TestScreen() {
     })
   }, [runId, authFetch])
 
-  function handleStart() {
+  async function setMediaPipeRunning(next) {
     if (!runId) return
-<<<<<<< Updated upstream
     try {
       await authFetch(
         `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/${next ? 'start' : 'stop'}/`,
         { method: 'POST' }
       )
-    } catch { /* non-fatal — the status line will show the tracker state */ }
+    } catch {
+      // Non-fatal — tracker status will show the current state.
+    }
     if (!next) setTracker({ running: false, camera_ok: null })
   }
 
-  // ── Gaze calibration ──────────────────────────────────────────────────────
-  // Resolves when the patient presses Space/Enter or clicks (same response
-  // button as the test). Capture phase so nothing else swallows the event.
-  function waitForPress() {
-    return new Promise(resolve => {
-      function cleanup() {
-        window.removeEventListener('keydown', onKey, true)
-        window.removeEventListener('mousedown', onMouse, true)
-      }
-      function onKey(e) {
-        if (e.code !== 'Space' && e.code !== 'Enter') return
-        e.preventDefault()
-        cleanup()
-        resolve()
-      }
-      function onMouse(e) {
-        if (e.button !== 0) return
-        if (e.target?.closest?.('[data-calibration-cancel]')) return
-        cleanup()
-        resolve()
-      }
-      window.addEventListener('keydown', onKey, true)
-      window.addEventListener('mousedown', onMouse, true)
-    })
-  }
-
-  // Sample raw iris ratios from the state endpoint: 8 reads at 150ms
-  // intervals, skip nulls (no face), need at least 4 to accept. The tracker
-  // is shaky even on a still eye, so use the median — one blink or landmark
-  // spike can't drag the calibration point the way a mean would.
-  function median(values) {
-    const sorted = [...values].sort((a, b) => a - b)
-    const mid = Math.floor(sorted.length / 2)
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
-  }
-
-  async function sampleIrisRatios() {
-    // Let the head/eyes settle after the button press before sampling
-    await new Promise(r => setTimeout(r, 300))
-
-    const hs = []
-    const vs = []
-    for (let i = 0; i < 8; i++) {
-      try {
-        const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
-        if (res.ok) {
-          const state = await res.json()
-          if (state.raw_h != null && state.raw_v != null) {
-            hs.push(state.raw_h)
-            vs.push(state.raw_v)
-          }
-        }
-      } catch { /* failed read — counts as a skipped sample */ }
-      await new Promise(r => setTimeout(r, 150))
-    }
-    if (hs.length < 4) return null
-    return { h: median(hs), v: median(vs) }
-  }
-
-  // Show the 5 dots in order, sample the patient's iris ratios at each, and
-  // save the calibration. Returns true if calibrated, false if the test
-  // should start uncalibrated.
-  async function runCalibration() {
-    calibratingRef.current = true
-    let animId = null
-    try {
-      const points = []
-
-      for (let i = 0; i < CALIBRATION_TARGETS.length; i++) {
-        const [sx, sy] = CALIBRATION_TARGETS[i]
-
-        // Pulse-animate this target dot until sampling is done
-        let startTime = null
-        function animateDot(timestamp) {
-          if (!startTime) startTime = timestamp
-          const elapsed = (timestamp - startTime) / 1000
-          const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
-          if (canvasRef.current) {
-            redrawGrid()
-            drawCalibrationDot(canvasRef.current, sx, sy, pulse)
-          }
-          animId = requestAnimationFrame(animateDot)
-        }
-        animId = requestAnimationFrame(animateDot)
-
-        let sample = null
-        for (let attempt = 0; attempt < 2 && !sample; attempt++) {
-          setCalibStep({ index: i, sampling: false })
-          setCalibMessage(attempt === 0
-            ? 'Stare at the dot, then press Space'
-            : 'Face not detected — stare at the dot and press again')
-          await waitForPress()
-          setCalibStep({ index: i, sampling: true })
-          setCalibMessage('Hold still…')
-          sample = await sampleIrisRatios()
-        }
-
-        cancelAnimationFrame(animId)
-        animId = null
-
-        if (!sample) {
-          setCalibStep(null)
-          setCalibMessage('Face not detected — starting test without calibration')
-          await new Promise(r => setTimeout(r, 2500))
-          return false
-        }
-        points.push({ sx, sy, h: sample.h, v: sample.v })
-      }
-
-      setCalibStep(null)
-      const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
-        method: 'POST',
-        body: JSON.stringify({ points }),
-      })
-      if (!res.ok) {
-        console.error('Failed to save calibration:', res.status)
-        setCalibMessage('Could not save calibration — starting test without it')
-        await new Promise(r => setTimeout(r, 2500))
-        return false
-      }
-      // Saving is not the same as being usable: if the patient tracked the
-      // dots with their head instead of their eyes, the readings barely differ
-      // between dots and the mapping gets discarded on every frame. Say so
-      // here rather than letting the run look calibrated when it isn't.
-      const result = await res.json().catch(() => null)
-      if (result && result.usable === false) {
-        console.warn('Calibration too flat to use:', result)
-        setCalibMessage(
-          'Eye movement between the dots was too small to calibrate — ' +
-          'ask the patient to keep their head still and move only their eyes, ' +
-          'then calibrate again. Starting without calibration.'
-        )
-        await new Promise(r => setTimeout(r, 4000))
-        return false
-      }
-      return true
-    } catch (err) {
-      console.error('Calibration error:', err)
-      return false
-    } finally {
-      if (animId) cancelAnimationFrame(animId)
-      calibratingRef.current = false
-      setCalibStep(null)
-      setCalibMessage('')
-      redrawGrid()
-    }
+  async function handleToggleEyeTracking() {
+    const next = !eyeTrackingRef.current
+    eyeTrackingRef.current = next
+    setEyeTracking(next)
+    localStorage.setItem('perivue_eye_tracking', next ? 'on' : 'off')
+    await setMediaPipeRunning(next)
   }
 
   async function handleStart() {
     if (!runId) return
     if (calibratingRef.current) return
-=======
->>>>>>> Stashed changes
+
+    if (eyeTrackingRef.current) {
+      await setMediaPipeRunning(true)
+      // Give the tracker a moment to start and populate its state before calibration.
+      await new Promise(r => setTimeout(r, 700))
+      await runCalibration()
+    }
+
     // Reset local state for a fresh run
     currentPointIndexRef.current = 0
     pendingTrialsRef.current = []
@@ -883,7 +781,7 @@ export default function TestScreen() {
         </div>
       )}
 
-<<<<<<< Updated upstream
+
       {/* Calibration progress. A bare "3 / 5" tells the clinician how much is
           left but not what is about to happen, so the counter sits next to a
           small map of the screen with the five target positions on it — the
@@ -949,8 +847,7 @@ export default function TestScreen() {
         </div>
       )}
 
-=======
->>>>>>> Stashed changes
+
       {/* Fixation warning */}
       {!isFixating && started && !overlay && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20
@@ -1007,7 +904,7 @@ export default function TestScreen() {
                 No run ID — go back and start a session
               </p>
             )}
-<<<<<<< Updated upstream
+
 
             {/* Eye tracking toggle + camera status — settings before Begin test */}
             {!paused && (
@@ -1063,8 +960,7 @@ export default function TestScreen() {
               </div>
             )}
 
-=======
->>>>>>> Stashed changes
+
             <div className="flex gap-3">
               {paused ? (
                 <button
