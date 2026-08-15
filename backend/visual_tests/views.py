@@ -493,7 +493,19 @@ def _calibration_spans(calibration):
         if len(points) != 5:
             return None
 
-        corners = points[:4]
+        # Find the centre dot by its coordinates rather than by position in the
+        # list. It used to be assumed last, which silently broke when the
+        # canvas reordered CALIBRATION_TARGETS to put the centre third: the
+        # centre was averaged in as a corner and a real corner became the
+        # origin, offsetting every mapped gaze by half the screen.
+        center = next(
+            (p for p in points if abs(p["sx"] - 0.5) < 0.05 and abs(p["sy"] - 0.5) < 0.05),
+            None,
+        )
+        if center is None:
+            return None
+        corners = [p for p in points if p is not center]
+
         left = [p for p in corners if p["sx"] < 0.5]
         right = [p for p in corners if p["sx"] > 0.5]
         top = [p for p in corners if p["sy"] < 0.5]
@@ -505,12 +517,7 @@ def _calibration_spans(calibration):
         h_right = sum(p["h"] for p in right) / len(right)
         v_top = sum(p["v"] for p in top) / len(top)
         v_bottom = sum(p["v"] for p in bottom) / len(bottom)
-        return (
-            h_right - h_left,
-            v_bottom - v_top,
-            points[4]["h"],
-            points[4]["v"],
-        )
+        return (h_right - h_left, v_bottom - v_top, center["h"], center["v"])
     except (KeyError, TypeError, ValueError):
         return None
 

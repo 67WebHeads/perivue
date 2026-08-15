@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API_BASE_URL from '../../config/api';
 import { useNavigate } from 'react-router-dom';
+import { cachedFetch, invalidate, invalidatePrefix } from '../../cache/apiCache';
 
 const inputClass = `
   w-full px-3 py-2 rounded-lg text-sm
@@ -109,20 +110,19 @@ function PatientTestHistory({ patientId, authFetch }) {
 
   useEffect(() => {
     if (!patientId) return;
-    authFetch(`${API_BASE_URL}/api/visual-tests/sessions/?patient_id=${patientId}`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setSessions(data))
+    // Per-patient session lists: 2 min TTL, short enough to stay reasonably fresh
+    cachedFetch(
+      authFetch,
+      `${API_BASE_URL}/api/visual-tests/sessions/?patient_id=${patientId}`,
+      { ttl: 2 * 60_000 }
+    )
+      .then(data => setSessions(Array.isArray(data) ? data : []))
       .catch(() => setSessions([]))
       .finally(() => setLoading(false));
   }, [patientId, authFetch]);
 
-  if (loading) {
-    return <p className="text-white/20 text-xs text-center py-6">Loading tests…</p>;
-  }
-
-  if (sessions.length === 0) {
-    return <p className="text-white/20 text-xs text-center py-6">No tests recorded yet</p>;
-  }
+  if (loading) return <p className="text-white/20 text-xs text-center py-6">Loading tests…</p>;
+  if (sessions.length === 0) return <p className="text-white/20 text-xs text-center py-6">No tests recorded yet</p>;
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden">
@@ -149,11 +149,7 @@ function PatientTestHistory({ patientId, authFetch }) {
               <td className="px-4 py-2.5 text-white/50 text-xs">{s.performed_by_name || "—"}</td>
               <td className="px-4 py-2.5 text-right">
                 <button
-                  onClick={() => {
-                    // Find the most recent run for this session by fetching runs
-                    // We navigate to results using session id approach
-                    navigate(`/test/results?session_id=${s.id}`)
-                  }}
+                  onClick={() => navigate(`/test/results?session_id=${s.id}`)}
                   className="text-xs px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 transition-all"
                 >
                   View results
@@ -187,21 +183,29 @@ export default function Records() {
   const [submitting, setSubmitting]       = useState(false);
   const [error, setError]                 = useState(null);
 
+  // Staff: 10 min TTL — rarely changes
   useEffect(() => {
-    authFetch(`${API_BASE_URL}/api/users/staff/`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setStaff(data))
+    cachedFetch(authFetch, `${API_BASE_URL}/api/users/staff/`, { ttl: 10 * 60_000 })
+      .then(data => setStaff(Array.isArray(data) ? data : []))
       .catch(() => setStaff([]));
   }, [authFetch]);
 
-  const fetchPatients = useCallback(async (q = "") => {
+  // fetchPatients: uses cache for the base list, bypasses it for search queries
+  // so live search still hits the server (search results aren't worth caching)
+  const fetchPatients = useCallback(async (q = "", force = false) => {
     setLoading(true);
     try {
       const url = new URL(`${API_BASE_URL}/api/patients/`);
       if (q) url.searchParams.set("search", q);
-      const res = await authFetch(url.toString());
-      if (!res.ok) throw new Error("Failed to fetch patients");
-      setPatients(await res.json());
+      const urlStr = url.toString();
+
+      // Only cache the un-searched base list (5 min TTL)
+      // Searched variants go straight to the network every time
+      const data = q
+        ? await authFetch(urlStr).then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        : await cachedFetch(authFetch, urlStr, { ttl: 5 * 60_000, force });
+
+      setPatients(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -210,6 +214,8 @@ export default function Records() {
   }, [authFetch]);
 
   useEffect(() => { fetchPatients(); }, [fetchPatients]);
+
+  // Debounced search — always live, never cached
   useEffect(() => {
     const t = setTimeout(() => fetchPatients(search), 300);
     return () => clearTimeout(t);
@@ -227,7 +233,13 @@ export default function Records() {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error(JSON.stringify(await res.json()));
-      await fetchPatients(search);
+
+      // Bust the base patient list so the next load gets fresh data
+      invalidatePrefix(`${API_BASE_URL}/api/patients/`);
+      // Also bust dashboard stats (total_patients just went up)
+      invalidate(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`);
+
+      await fetchPatients(search, true);
       setShowNewTest(false);
       setForm(emptyForm);
     } catch (err) { setError(err.message); }
@@ -262,6 +274,10 @@ export default function Records() {
       });
       if (!res.ok) throw new Error(JSON.stringify(await res.json()));
       const updated = await res.json();
+
+      // Bust this patient and the list so both are fresh
+      invalidatePrefix(`${API_BASE_URL}/api/patients/`);
+
       setSelected(updated);
       setPatients(prev => prev.map(p => p.id === updated.id ? updated : p));
       setIsEditing(false);
@@ -279,6 +295,11 @@ export default function Records() {
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/${selected.id}/`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete patient");
+
+      // Bust patient list + dashboard stats (total_patients dropped)
+      invalidatePrefix(`${API_BASE_URL}/api/patients/`);
+      invalidate(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`);
+
       setPatients(prev => prev.filter(p => p.id !== selected.id));
       handleCloseModal();
     } catch (err) { setEditError(err.message); setConfirmDelete(false); }
@@ -369,7 +390,6 @@ export default function Records() {
       {/* ── View / Edit patient modal ── */}
       {selected && (
         <Modal onClose={handleCloseModal} maxWidth="max-w-2xl">
-          {/* Pinned header */}
           <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-sm font-semibold text-white/70">
@@ -386,7 +406,6 @@ export default function Records() {
             </div>
           </div>
 
-          {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5">
             {!isEditing ? (
               <>
@@ -453,7 +472,6 @@ export default function Records() {
                   </div>
                 )}
 
-                {/* ── Real test history ── */}
                 <div className="border-t border-white/10" />
                 <div>
                   <p className="text-white/40 text-xs uppercase tracking-wider mb-3">Tests performed</p>
@@ -517,7 +535,6 @@ export default function Records() {
             )}
           </div>
 
-          {/* Pinned footer — edit mode only */}
           {isEditing && (
             <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 shrink-0">
               <button onClick={handleCancelEdit} disabled={saving}
