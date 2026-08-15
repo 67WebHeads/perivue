@@ -707,6 +707,16 @@ export default function TestScreen() {
     try {
       await stopMediaPipeRef.current?.()
     } catch { /* non-fatal */ }
+    // Discard the run entirely. The session and run rows are created before
+    // the canvas even opens, so without this a cancelled test still lands in
+    // the patient's history as an entry with no results in it.
+    if (runId) {
+      try {
+        await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/`, {
+          method: 'DELETE',
+        })
+      } catch { /* non-fatal — the session list hides unfinished ones anyway */ }
+    }
     navigate('/test-menu', { replace: true })
   }
 
@@ -889,6 +899,17 @@ export default function TestScreen() {
     // clinician disabled eye tracking.
     if (eyeTrackingRef.current) {
       await runCalibration()
+
+      // Calibration ends on a keypress, and the first stimulus used to follow
+      // it immediately — so the patient was still resettling from the last
+      // corner dot while point 1 was already being shown. Wait for a
+      // deliberate go-ahead so the clinician can get them fixating on the
+      // centre cross first.
+      calibratingRef.current = true   // keeps a double-click from pausing here
+      setCalibMessage('Calibration done — have the patient look at the centre cross, then press Space to begin')
+      await waitForPress()
+      setCalibMessage('')
+      calibratingRef.current = false
     }
 
     setStarted(true)
