@@ -175,6 +175,14 @@ class SessionListCreateView(APIView):
         if patient_id:
             sessions = sessions.filter(patient_id=patient_id)
 
+        # A session with no completed run is not a clinical record — it is a
+        # test that was cancelled, crashed, or had its tab closed partway
+        # through. Listing those put rows with blank results in a patient's
+        # history. Cancelling now deletes the run outright (RunDetailView), so
+        # this mainly catches the abandoned ones nobody got to clean up.
+        if request.query_params.get("include_unfinished") != "1":
+            sessions = sessions.filter(runs__status="completed").distinct()
+
         return Response(TestSessionListSerializer(sessions, many=True).data)
 
     def post(self, request):
@@ -485,7 +493,19 @@ def _calibration_spans(calibration):
         if len(points) != 5:
             return None
 
-        corners = points[:4]
+        # Find the centre dot by its coordinates rather than by position in the
+        # list. It used to be assumed last, which silently broke when the
+        # canvas reordered CALIBRATION_TARGETS to put the centre third: the
+        # centre was averaged in as a corner and a real corner became the
+        # origin, offsetting every mapped gaze by half the screen.
+        center = next(
+            (p for p in points if abs(p["sx"] - 0.5) < 0.05 and abs(p["sy"] - 0.5) < 0.05),
+            None,
+        )
+        if center is None:
+            return None
+        corners = [p for p in points if p is not center]
+
         left = [p for p in corners if p["sx"] < 0.5]
         right = [p for p in corners if p["sx"] > 0.5]
         top = [p for p in corners if p["sy"] < 0.5]
@@ -497,12 +517,7 @@ def _calibration_spans(calibration):
         h_right = sum(p["h"] for p in right) / len(right)
         v_top = sum(p["v"] for p in top) / len(top)
         v_bottom = sum(p["v"] for p in bottom) / len(bottom)
-        return (
-            h_right - h_left,
-            v_bottom - v_top,
-            points[4]["h"],
-            points[4]["v"],
-        )
+        return (h_right - h_left, v_bottom - v_top, center["h"], center["v"])
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -534,6 +549,41 @@ def _apply_calibration(calibration, raw_h, raw_v):
         return gaze_x, gaze_y, fixating
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
+
+
+class RunDetailView(APIView):
+    """
+    DELETE discards an unfinished run — the clinician cancelled, so nothing
+    about it belongs in the patient's history. The session goes too if this
+    was its only run, otherwise an empty session would be left behind and
+    still show up as a test that was performed.
+
+    A completed run is never deleted here: results are the clinical record,
+    and removing them is not something a cancel button should be able to do.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        run = get_object_or_404(TestRun, pk=pk)
+
+        if run.status == "completed":
+            return Response(
+                {"error": "A completed run cannot be discarded."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = run.session
+        run.delete()  # cascades to TrialResult and FixationEvent
+
+        session_deleted = False
+        if not session.runs.exists():
+            session.delete()
+            session_deleted = True
+
+        return Response(
+            {"ok": True, "discarded": True, "session_deleted": session_deleted}
+        )
 
 
 class RunCalibrationView(APIView):

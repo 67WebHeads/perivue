@@ -20,6 +20,7 @@ urlpatterns = [
         name="run-create",
     ),
     # Runs
+    path("runs/<uuid:pk>/", views.RunDetailView.as_view(), name="run-detail"),
     path("runs/<uuid:pk>/state/", views.RunStateView.as_view(), name="run-state"),
     path("runs/<uuid:pk>/command/", views.RunCommandView.as_view(), name="run-command"),
     path(

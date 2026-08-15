@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 
@@ -102,7 +102,7 @@ const CALIBRATION_TARGETS = [
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
 
-function drawGrid(canvas) {
+function drawGrid(canvas, opacity = 1) {
   const ctx = canvas.getContext('2d')
   const W = canvas.width
   const H = canvas.height
@@ -110,6 +110,10 @@ function drawGrid(canvas) {
   const cy = H / 2
   const maxRing = RINGS[RINGS.length - 1]
   const scale = Math.min(W, H) * 0.44 / maxRing
+  // Lets the clinician fade the printed tangent screen behind the projection
+  // without dimming the stimulus dot — see the settings panel
+  const gridOpacity = Math.max(0, Math.min(1, opacity))
+  const white = (alpha) => `rgba(255,255,255,${alpha * gridOpacity})`
 
   ctx.clearRect(0, 0, W, H)
   ctx.fillStyle = '#000'
@@ -119,11 +123,11 @@ function drawGrid(canvas) {
     const px = r * scale
     ctx.beginPath()
     ctx.arc(cx, cy, px, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+    ctx.strokeStyle = white(0.7)
     ctx.lineWidth = r === maxRing ? 2 : 1
     ctx.stroke()
     if (r < maxRing) {
-      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.fillStyle = white(0.7)
       ctx.font = `${Math.max(10, scale * 1.1)}px monospace`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'bottom'
@@ -137,7 +141,7 @@ function drawGrid(canvas) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + outerPx * Math.cos(rad), cy + outerPx * Math.sin(rad))
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+    ctx.strokeStyle = white(0.55)
     ctx.lineWidth = 0.6
     ctx.stroke()
   })
@@ -147,7 +151,7 @@ function drawGrid(canvas) {
     const rad = (angleDeg - 90) * (Math.PI / 180)
     const lx = cx + labelR * Math.cos(rad)
     const ly = cy + labelR * Math.sin(rad)
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.fillStyle = white(0.9)
     ctx.font = `${Math.max(11, scale * 1.3)}px monospace`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -157,7 +161,7 @@ function drawGrid(canvas) {
   const crossAngles = Array.from({ length: 16 }, (_, i) => i * (Math.PI / 8))
   const innerR = scale * 0.5
   const outerR = scale * 1.6
-  ctx.strokeStyle = 'rgba(255,255,255,1.0)'
+  ctx.strokeStyle = white(1.0)
   ctx.lineWidth = 1.2
   crossAngles.forEach(a => {
     ctx.beginPath()
@@ -168,7 +172,7 @@ function drawGrid(canvas) {
 
   ctx.beginPath()
   ctx.arc(cx, cy, 2, 0, Math.PI * 2)
-  ctx.fillStyle = 'white'
+  ctx.fillStyle = white(1.0)
   ctx.fill()
 
   return { cx, cy, scale }
@@ -226,10 +230,10 @@ function drawGazeDot(canvas, gazeX, gazeY, isFixating) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-function redrawGrid(canvasRef, gridMeta) {
+function redrawGrid(canvasRef, gridMeta, opacity = 1) {
   const canvas = canvasRef.current
   if (!canvas) return
-  gridMeta.current = drawGrid(canvas)
+  gridMeta.current = drawGrid(canvas, opacity)
 }
 
 function drawCalibrationTarget(canvas, sx, sy, pulse) {
@@ -254,6 +258,7 @@ export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
   const { authFetch } = useAuth()
+  const navigate = useNavigate()
 
   const canvasRef = useRef(null)
   const gridMeta  = useRef({ cx: 0, cy: 0, scale: 1 })
@@ -325,7 +330,15 @@ export default function TestScreen() {
     if (!canvas) return
     canvas.width  = window.innerWidth
     canvas.height = window.innerHeight
-    gridMeta.current = drawGrid(canvas)
+    gridMeta.current = drawGrid(canvas, tangentScreenOpacityRef.current / 100)
+  }
+
+  // Redraw on every slider step so the change is visible while dragging
+  function handleTangentOpacityChange(e) {
+    const nextOpacity = Number(e.target.value)
+    setTangentScreenOpacity(nextOpacity)
+    tangentScreenOpacityRef.current = nextOpacity
+    redrawGrid(canvasRef, gridMeta, nextOpacity / 100)
   }
 
   useEffect(() => {
@@ -336,9 +349,11 @@ export default function TestScreen() {
 
   // ── Pulse + gaze animation — only while overlay is visible ────────────────
   useEffect(() => {
-    if (!overlay) {
+    // Also runs during a fixation pause, so the clinician can watch the gaze
+    // dot to see when the patient is back on the centre cross
+    if (!overlay && !fixationPaused) {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
-      if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+      if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
       return
     }
 
@@ -349,7 +364,7 @@ export default function TestScreen() {
       const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
 
       if (canvasRef.current) {
-        gridMeta.current = drawGrid(canvasRef.current)
+        gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
         drawCalibrationDot(canvasRef.current, gridMeta.current, pulse)
         drawGazeDot(
           canvasRef.current,
@@ -365,7 +380,7 @@ export default function TestScreen() {
     return () => {
       if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current)
     }
-  }, [overlay])
+  }, [overlay, fixationPaused])
 
   // ── Stop MediaPipe ────────────────────────────────────────────────────────
   const stopMediaPipe = useCallback(async () => {
@@ -452,7 +467,7 @@ export default function TestScreen() {
       responseWindowRef.current = null
     }
     if (canvasRef.current) {
-      gridMeta.current = drawGrid(canvasRef.current)
+      gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
     }
   }, [])
 
@@ -460,6 +475,7 @@ export default function TestScreen() {
   const runStaticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (fixationPausedRef.current) return  // resume will re-run this point
 
     trialActiveRef.current = true
     trialStartRef.current  = null               // set after dot appears
@@ -474,7 +490,7 @@ export default function TestScreen() {
       responseWindowRef.current = setTimeout(async () => {
         if (!trialActiveRef.current) return
         trialActiveRef.current = false
-        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
         recordTrial(point, 'not_seen', null)
         await advanceOrFinish()
       }, 2000)
@@ -487,6 +503,7 @@ export default function TestScreen() {
   const runKineticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (fixationPausedRef.current) return  // resume will re-run this point
 
     trialActiveRef.current = true
     trialStartRef.current  = performance.now()
@@ -510,12 +527,12 @@ export default function TestScreen() {
       const yDeg = currentRadius * Math.sin(angleRad)
       kineticPosRef.current = { xDeg, yDeg }
 
-      drawGrid(canvas)
+      drawGrid(canvas, tangentScreenOpacityRef.current / 100)
       drawDot(canvas, gridMeta.current, xDeg, yDeg, color, sizeDeg)
 
       if (currentRadius <= 0) {
         trialActiveRef.current = false
-        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+        if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
         recordTrial(point, 'not_seen', null, null, null)
         kineticPosRef.current = null
         await advanceOrFinish()
@@ -553,7 +570,7 @@ export default function TestScreen() {
       clearTimeout(responseWindowRef.current)
       responseWindowRef.current = null
     }
-    if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current)
+    if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
 
     if (point?.point_type === 'kinetic' && pos) {
       recordTrial(
@@ -617,6 +634,19 @@ export default function TestScreen() {
           endTrial()
         } else {
           setPaused(false)
+
+          // Fixation lost mid-test → halt on the current point until the
+          // clinician re-centers the patient and presses to continue
+          if (
+            eyeTrackingRef.current &&
+            !state.is_fixating &&
+            !fixationPausedRef.current &&
+            !calibratingRef.current
+          ) {
+            fixationPausedRef.current = true
+            setFixationPaused(true)
+            endTrial()
+          }
         }
       } catch (err) {
         console.error('Poll error:', err)
@@ -624,13 +654,14 @@ export default function TestScreen() {
     }
 
     poll()
-    const interval = setInterval(poll, 1000)
+    // 500ms so a fixation loss halts the test quickly (was 1s)
+    const interval = setInterval(poll, 500)
     return () => clearInterval(interval)
   }, [started, runId, authFetch, endTrial])
 
-  // ── Gaze polling during overlay ───────────────────────────────────────────
+  // ── Gaze polling during overlay / fixation pause ──────────────────────────
   useEffect(() => {
-    if (!overlay || !runId) return
+    if ((!overlay && !fixationPaused) || !runId) return
 
     async function pollGaze() {
       try {
@@ -652,7 +683,47 @@ export default function TestScreen() {
     pollGaze()
     const interval = setInterval(pollGaze, 300)
     return () => clearInterval(interval)
-  }, [overlay, runId, authFetch])
+  }, [overlay, fixationPaused, runId, authFetch])
+
+  // ── Fixation pause: clinician continues with Space/Enter/click ────────────
+  useEffect(() => {
+    if (!fixationPaused) return
+
+    function resume() {
+      fixationPausedRef.current = false
+      setFixationPaused(false)
+      // Small delay so a stray second press can't register as a false
+      // "seen" on the repeated trial
+      setTimeout(() => {
+        if (fixationPausedRef.current) return
+        const point = DEFAULT_POINTS[currentPointIndexRef.current]
+        if (!point) return
+        if (point.point_type === 'static') {
+          runStaticTrialRef.current?.(point)
+        } else {
+          runKineticTrialRef.current?.(point)
+        }
+      }, 400)
+    }
+
+    function onKey(e) {
+      if (e.code !== 'Space' && e.code !== 'Enter') return
+      e.preventDefault()
+      e.stopPropagation()
+      resume()
+    }
+    function onMouse(e) {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      resume()
+    }
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('mousedown', onMouse, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('mousedown', onMouse, true)
+    }
+  }, [fixationPaused])
 
   // ── Commands ──────────────────────────────────────────────────────────────
   const sendCommand = useCallback(async (command) => {
@@ -662,6 +733,27 @@ export default function TestScreen() {
       body: JSON.stringify({ command }),
     })
   }, [runId, authFetch])
+
+  async function handleCancelTest() {
+    setCalibMessage('Cancelling test…')
+    try {
+      await sendCommand('abort')
+    } catch { /* still stop tracking and leave the canvas */ }
+    try {
+      await stopMediaPipeRef.current?.()
+    } catch { /* non-fatal */ }
+    // Discard the run entirely. The session and run rows are created before
+    // the canvas even opens, so without this a cancelled test still lands in
+    // the patient's history as an entry with no results in it.
+    if (runId) {
+      try {
+        await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/`, {
+          method: 'DELETE',
+        })
+      } catch { /* non-fatal — the session list hides unfinished ones anyway */ }
+    }
+    navigate('/test-menu', { replace: true })
+  }
 
   async function setMediaPipeRunning(next) {
     if (!runId) return
@@ -684,22 +776,187 @@ export default function TestScreen() {
     await setMediaPipeRunning(next)
   }
 
+  // ── Gaze calibration ──────────────────────────────────────────────────────
+  // Resolves when the patient presses Space/Enter or clicks (same response
+  // button as the test). Capture phase so nothing else swallows the event.
+  function waitForPress() {
+    return new Promise(resolve => {
+      function cleanup() {
+        window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('mousedown', onMouse, true)
+      }
+      function onKey(e) {
+        if (e.code !== 'Space' && e.code !== 'Enter') return
+        e.preventDefault()
+        cleanup()
+        resolve()
+      }
+      function onMouse(e) {
+        if (e.button !== 0) return
+        if (e.target?.closest?.('[data-calibration-cancel]')) return
+        cleanup()
+        resolve()
+      }
+      window.addEventListener('keydown', onKey, true)
+      window.addEventListener('mousedown', onMouse, true)
+    })
+  }
+
+  // Sample raw iris ratios from the state endpoint: 8 reads at 150ms
+  // intervals, skip nulls (no face), need at least 4 to accept. The tracker
+  // is shaky even on a still eye, so use the median — one blink or landmark
+  // spike can't drag the calibration point the way a mean would.
+  function median(values) {
+    const sorted = [...values].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  }
+
+  async function sampleIrisRatios() {
+    // Let the head/eyes settle after the button press before sampling
+    await new Promise(r => setTimeout(r, 300))
+
+    const hs = []
+    const vs = []
+    for (let i = 0; i < 8; i++) {
+      try {
+        const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
+        if (res.ok) {
+          const state = await res.json()
+          if (state.raw_h != null && state.raw_v != null) {
+            hs.push(state.raw_h)
+            vs.push(state.raw_v)
+          }
+        }
+      } catch { /* failed read — counts as a skipped sample */ }
+      await new Promise(r => setTimeout(r, 150))
+    }
+    if (hs.length < 4) return null
+    return { h: median(hs), v: median(vs) }
+  }
+
+  // Show the 5 dots in order, sample the patient's iris ratios at each, and
+  // save the calibration. Returns true if calibrated, false if the test
+  // should start uncalibrated.
+  async function runCalibration() {
+    calibratingRef.current = true
+    let animId = null
+    try {
+      const points = []
+
+      for (let i = 0; i < CALIBRATION_TARGETS.length; i++) {
+        const [sx, sy] = CALIBRATION_TARGETS[i]
+
+        // Pulse-animate this target dot until sampling is done
+        let startTime = null
+        function animateDot(timestamp) {
+          if (!startTime) startTime = timestamp
+          const elapsed = (timestamp - startTime) / 1000
+          const pulse = (Math.sin(elapsed * Math.PI * 1.5) + 1) / 2
+          if (canvasRef.current) {
+            redrawGrid(canvasRef, gridMeta, tangentScreenOpacityRef.current / 100)
+            drawCalibrationTarget(canvasRef.current, sx, sy, pulse)
+          }
+          animId = requestAnimationFrame(animateDot)
+        }
+        animId = requestAnimationFrame(animateDot)
+
+        let sample = null
+        for (let attempt = 0; attempt < 2 && !sample; attempt++) {
+          setCalibStep({ index: i, sampling: false })
+          setCalibMessage(attempt === 0
+            ? 'Stare at the dot, then press Space'
+            : 'Face not detected — stare at the dot and press again')
+          await waitForPress()
+          setCalibStep({ index: i, sampling: true })
+          setCalibMessage('Hold still…')
+          sample = await sampleIrisRatios()
+        }
+
+        cancelAnimationFrame(animId)
+        animId = null
+
+        if (!sample) {
+          setCalibStep(null)
+          setCalibMessage('Face not detected — starting test without calibration')
+          await new Promise(r => setTimeout(r, 2500))
+          return false
+        }
+        points.push({ sx, sy, h: sample.h, v: sample.v })
+      }
+
+      setCalibStep(null)
+      const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
+        method: 'POST',
+        body: JSON.stringify({ points }),
+      })
+      if (!res.ok) {
+        console.error('Failed to save calibration:', res.status)
+        setCalibMessage('Could not save calibration — starting test without it')
+        await new Promise(r => setTimeout(r, 2500))
+        return false
+      }
+      // Saving is not the same as being usable: if the patient tracked the
+      // dots with their head instead of their eyes, the readings barely differ
+      // between dots and the mapping gets discarded on every frame. Say so
+      // here rather than letting the run look calibrated when it isn't.
+      const result = await res.json().catch(() => null)
+      if (result && result.usable === false) {
+        console.warn('Calibration too flat to use:', result)
+        setCalibMessage(
+          'Eye movement between the dots was too small to calibrate — ' +
+          'ask the patient to keep their head still and move only their eyes, ' +
+          'then calibrate again. Starting without calibration.'
+        )
+        await new Promise(r => setTimeout(r, 4000))
+        return false
+      }
+      return true
+    } catch (err) {
+      console.error('Calibration error:', err)
+      return false
+    } finally {
+      if (animId) cancelAnimationFrame(animId)
+      calibratingRef.current = false
+      setCalibStep(null)
+      setCalibMessage('')
+      redrawGrid(canvasRef, gridMeta, tangentScreenOpacityRef.current / 100)
+    }
+  }
+
   async function handleStart() {
     if (!runId) return
     if (calibratingRef.current) return
 
+    // Reset local state for a fresh run. This has to come before calibration:
+    // every calibration prompt is gated on !overlay, so calibrating with the
+    // overlay still up runs the whole 5-dot sequence invisibly behind it.
+    currentPointIndexRef.current = 0
+    pendingTrialsRef.current = []
+    setProgress({ current: 1, total: TOTAL_POINTS })
+    setOverlay(false)
+
+    // Calibrate first — pause/resume never comes back through here,
+    // so a run is only ever calibrated once. Skipped entirely when the
+    // clinician disabled eye tracking.
     if (eyeTrackingRef.current) {
       await setMediaPipeRunning(true)
       // Give the tracker a moment to start and populate its state before calibration.
       await new Promise(r => setTimeout(r, 700))
       await runCalibration()
+
+      // Calibration ends on a keypress, and the first stimulus used to follow
+      // it immediately — so the patient was still resettling from the last
+      // corner dot while point 1 was already being shown. Wait for a
+      // deliberate go-ahead so the clinician can get them fixating on the
+      // centre cross first.
+      calibratingRef.current = true   // keeps a double-click from pausing here
+      setCalibMessage('Calibration done — have the patient look at the centre cross, then press Space to begin')
+      await waitForPress()
+      setCalibMessage('')
+      calibratingRef.current = false
     }
 
-    // Reset local state for a fresh run
-    currentPointIndexRef.current = 0
-    pendingTrialsRef.current = []
-    setProgress({ current: 1, total: TOTAL_POINTS })
-    setOverlay(false)
     setStarted(true)
 
     // Kick off the first point immediately
@@ -728,6 +985,8 @@ export default function TestScreen() {
   }
 
   async function handleDoubleClick() {
+    if (calibratingRef.current) return    // no pausing mid-calibration
+    if (fixationPausedRef.current) return // resume handles the clicks here
     await sendCommand('pause')
     setOverlay(true)
     setPaused(true)
@@ -765,12 +1024,39 @@ export default function TestScreen() {
   }
 
   // ── Main render ───────────────────────────────────────────────────────────
+  // The cursor is hidden over the projection so it can't be mistaken for a
+  // stimulus, but it has to come back for the settings panel to be usable
+  const cursorClass = started && !overlay && !settingsOpen
+    ? 'cursor-none'
+    : 'cursor-auto'
+
   return (
     <div
-      className="relative w-screen h-screen bg-black overflow-hidden cursor-none"
+      className={`relative w-screen h-screen bg-black overflow-hidden ${cursorClass}`}
       onDoubleClick={handleDoubleClick}
     >
       <canvas ref={canvasRef} className="absolute inset-0" />
+
+      {/* Cancel, during calibration and the pre-test wait. Without this there
+          is no way off the canvas short of finishing all 40 points, and the
+          run it abandons is discarded rather than left in the patient's
+          history — see handleCancelTest. */}
+      {calibMessage && !overlay && !started && (
+        <button
+          type="button"
+          data-calibration-cancel
+          onClick={handleCancelTest}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="absolute left-5 top-4 z-30 flex h-8 w-8 items-center justify-center rounded-full
+            border border-white/12 bg-white/8 text-white/50 cursor-auto
+            hover:bg-red-500/20 hover:border-red-400/30 hover:text-red-200 transition-all"
+          aria-label="Cancel test"
+        >
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
 
       {/* Progress counter */}
       {started && !overlay && progress.total > 0 && (
@@ -849,11 +1135,27 @@ export default function TestScreen() {
 
 
       {/* Fixation warning */}
-      {!isFixating && started && !overlay && (
+      {!isFixating && started && !overlay && !fixationPaused && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20
           px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/30
           text-red-400 text-xs font-medium pointer-events-none">
           Look at the center
+        </div>
+      )}
+
+      {/* Fixation pause — the test halts on the current point until the
+          clinician has the patient back on the cross and presses to continue.
+          The point is then re-run, so nothing is scored while they looked away. */}
+      {fixationPaused && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center
+          gap-3 bg-black/70 backdrop-blur-sm pointer-events-none">
+          <p className="text-red-400 text-lg font-medium">Fixation lost</p>
+          <p className="text-white/50 text-sm">
+            Have the patient look at the centre cross again
+          </p>
+          <p className="text-white/30 text-xs mt-1">
+            Press Space or click to continue — this point will be repeated
+          </p>
         </div>
       )}
 
@@ -877,9 +1179,15 @@ export default function TestScreen() {
               <span className="text-white/15 text-xs font-mono">{runId.slice(0, 8)}…</span>
             )}
 
-            <button className="w-8 h-8 flex items-center justify-center rounded-full
+            {/* settings button */}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="w-8 h-8 flex items-center justify-center rounded-full
               bg-white/8 border border-white/12 text-white/50
-              hover:text-white hover:bg-white/15 transition-all">
+              hover:text-white hover:bg-white/15 transition-all"
+              aria-label="Open test settings"
+            >
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -984,6 +1292,65 @@ export default function TestScreen() {
                   Begin test
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm cursor-auto p-4"
+          onClick={() => setSettingsOpen(false)}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/12 bg-[#10101f] p-5 text-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold">Test settings</h2>
+                <p className="mt-1 text-xs text-white/35">
+                  Adjust the projected test display.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full
+                  border border-white/10 bg-white/5 text-white/45
+                  hover:bg-white/10 hover:text-white transition-all"
+                aria-label="Close test settings"
+              >
+                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <label htmlFor="tangent-screen-opacity" className="text-xs font-medium text-white/65">
+                  Tangent screen opacity
+                </label>
+                <span className="min-w-12 rounded-lg bg-white/8 px-2 py-1 text-right text-xs font-mono text-white/55">
+                  {tangentScreenOpacity}%
+                </span>
+              </div>
+              <input
+                id="tangent-screen-opacity"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={tangentScreenOpacity}
+                onChange={handleTangentOpacityChange}
+                className="w-full accent-purple-500"
+              />
+              <div className="mt-2 flex justify-between text-[10px] text-white/25">
+                <span>0%</span>
+                <span>100%</span>
+              </div>
             </div>
           </div>
         </div>
