@@ -7,6 +7,7 @@ import SpaceDashboardIcon from "@mui/icons-material/SpaceDashboard";
 import GroupIcon from "@mui/icons-material/Group";
 import LogoutIcon from "@mui/icons-material/Logout";
 import TrackChangesIcon from "@mui/icons-material/TrackChanges";
+import ManageAccountsIcon from "@mui/icons-material/ManageAccounts";
 
 function getInitials(name = "", email = "") {
   const source = name.trim() || email.trim();
@@ -61,7 +62,7 @@ function Layout() {
     { path: "/records", label: "Patients", icon: <GroupIcon /> },
     { path: "/test-menu", label: "Test", icon: <TrackChangesIcon /> },
     ...(user?.role === "admin" ? [
-      { path: "/users", label: "User Management" }
+      { path: "/users", label: "User Management", icon: <ManageAccountsIcon /> }
     ] : []),
   ];
 
@@ -81,6 +82,9 @@ function Layout() {
   }, [location, isMobile]);
 
   async function handleLogout() {
+    const confirmed = window.confirm("Are you sure you want to log out?");
+    if (!confirmed) return;
+
     await logout();
     navigate("/login", { replace: true });
   }
