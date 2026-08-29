@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
 import { useNavigate } from "react-router-dom";
+import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/apiCache";
 
 function getInitials(name = "") {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
@@ -168,22 +169,19 @@ export default function TestHome() {
   const [starting, setStarting]     = useState(false);
   const [error, setError]           = useState(null);
 
-  // Fetch patients
+  // Patients: 5 min TTL — same cache key as Records.jsx so they share the entry
   useEffect(() => {
-    authFetch(`${API_BASE_URL}/api/patients/`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setPatients(data))
+    cachedFetch(authFetch, `${API_BASE_URL}/api/patients/`, { ttl: 5 * 60_000 })
+      .then(data => setPatients(Array.isArray(data) ? data : []))
       .catch(() => setPatients([]))
       .finally(() => setLoadingPx(false));
   }, [authFetch]);
 
-  // Fetch protocols
+  // Protocols: 30 min TTL — essentially static, almost never changes
   useEffect(() => {
-    authFetch(`${API_BASE_URL}/api/visual-tests/protocols/`)
-      .then(res => res.ok ? res.json() : [])
+    cachedFetch(authFetch, `${API_BASE_URL}/api/visual-tests/protocols/`, { ttl: 30 * 60_000 })
       .then(data => {
-        setProtocols(data);
-        // Auto-select first protocol if only one exists
+        setProtocols(Array.isArray(data) ? data : []);
         if (data.length === 1) setProtocolId(data[0].id);
       })
       .catch(() => setProtocols([]));
@@ -200,11 +198,7 @@ export default function TestHome() {
       // Step 1 — create session
       const sessionRes = await authFetch(`${API_BASE_URL}/api/visual-tests/sessions/`, {
         method: "POST",
-        body: JSON.stringify({
-          patient: patientId,
-          protocol: protocolId,
-          eye: eye,
-        }),
+        body: JSON.stringify({ patient: patientId, protocol: protocolId, eye }),
       });
       if (!sessionRes.ok) throw new Error("Failed to create session");
       const session = await sessionRes.json();
@@ -212,30 +206,30 @@ export default function TestHome() {
       // Step 2 — create run
       const runRes = await authFetch(
         `${API_BASE_URL}/api/visual-tests/sessions/${session.id}/runs/`,
-        {
-          method: "POST",
-          body: JSON.stringify({ eye }),
-        }
+        { method: "POST", body: JSON.stringify({ eye }) }
       );
       if (!runRes.ok) throw new Error("Failed to create run");
       const run = await runRes.json();
 
-      // Step 3 — launch MediaPipe (unless eye tracking is toggled off on
-      // the test canvas — the toggle there can also start it later)
+      // Bust sessions list + dashboard stats so they reflect the new session
+      // next time Dashboard or Records is visited
+      invalidatePrefix(`${API_BASE_URL}/api/visual-tests/sessions/`);
+      invalidate(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`);
+
+      // Step 3 — launch MediaPipe
       if (localStorage.getItem('perivue_eye_tracking') !== 'off') {
         try {
           await authFetch(
             `${API_BASE_URL}/api/visual-tests/runs/${run.id}/mediapipe/start/`,
             { method: 'POST' }
-          )
+          );
         } catch {
-          // Non-fatal — test can continue without eye tracking
-          console.warn('MediaPipe could not be started')
+          console.warn('MediaPipe could not be started');
         }
       }
 
-      // Step 4 — go to canvas in the same tab
-      navigate(`/test/canvas?run_id=${run.id}`)
+      // Step 4 — go to canvas
+      navigate(`/test/canvas?run_id=${run.id}`);
 
     } catch (err) {
       setError(err.message);
@@ -269,12 +263,7 @@ export default function TestHome() {
           <span className="w-5 h-5 rounded-full bg-white/15 flex items-center justify-center text-white/50 text-xs font-medium shrink-0">1</span>
           <p className="text-white/50 text-xs uppercase tracking-wider font-medium">Patient</p>
         </div>
-        <PatientSelect
-          patients={patients}
-          value={patientId}
-          onChange={setPatientId}
-          loading={loadingPx}
-        />
+        <PatientSelect patients={patients} value={patientId} onChange={setPatientId} loading={loadingPx} />
       </section>
 
       <div className="border-t border-white/8" />
