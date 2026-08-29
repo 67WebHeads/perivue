@@ -712,20 +712,25 @@ export default function TestScreen() {
   }
 
   // ── Eye tracking toggle — starts/stops the MediaPipe process ─────────────
-  async function handleToggleEyeTracking() {
-    const next = !eyeTracking
-    setEyeTracking(next)
-    eyeTrackingRef.current = next
-    localStorage.setItem('perivue_eye_tracking', next ? 'on' : 'off')
-
+  async function setMediaPipeRunning(next) {
     if (!runId) return
     try {
       await authFetch(
         `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/${next ? 'start' : 'stop'}/`,
         { method: 'POST' }
       )
-    } catch { /* non-fatal — the status line will show the tracker state */ }
+    } catch {
+      // Non-fatal — tracker status will show the current state.
+    }
     if (!next) setTracker({ running: false, camera_ok: null })
+  }
+
+  async function handleToggleEyeTracking() {
+    const next = !eyeTrackingRef.current
+    eyeTrackingRef.current = next
+    setEyeTracking(next)
+    localStorage.setItem('perivue_eye_tracking', next ? 'on' : 'off')
+    await setMediaPipeRunning(next)
   }
 
   // ── Gaze calibration ──────────────────────────────────────────────────────
