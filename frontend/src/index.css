@@ -1,5 +1,37 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: dark --default;
+}
+
+/* PeriVue uses a dark glass UI. Keep browser defaults and DaisyUI tokens
+   consistent regardless of the device's preferred color scheme. */
+html {
+  color-scheme: dark;
+}
+
+body {
+  color: #fff;
+  background-color: #0d0d1a;
+}
+
+/* Keep translucent utility surfaces readable and consistent across displays.
+   The previous low-opacity white layers looked washed out on some screens. */
+[class~="bg-white/5"] {
+  background-color: rgb(15 23 42 / 0.82) !important;
+}
+
+[class~="bg-white/8"] {
+  background-color: rgb(15 23 42 / 0.86) !important;
+}
+
+[class~="bg-white/10"] {
+  background-color: rgb(15 23 42 / 0.9) !important;
+}
+
+[class~="backdrop-blur-xl"] {
+  backdrop-filter: blur(6px) !important;
+}
+
 html, body{
   height: 100%;
   margin: 0;

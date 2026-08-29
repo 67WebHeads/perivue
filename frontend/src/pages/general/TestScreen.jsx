@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 
@@ -703,6 +703,14 @@ export default function TestScreen() {
     navigate('/test-menu', { replace: true })
   }
 
+  function handleBackToPreviousPage() {
+    // Abort/stop tracking in the background, then return to the page that
+    // opened the canvas instead of navigating to a hard-coded route.
+    sendCommand('abort').catch(() => {})
+    Promise.resolve(stopMediaPipeRef.current?.()).catch(() => {})
+    navigate(-1)
+  }
+
   // ── Eye tracking toggle — starts/stops the MediaPipe process ─────────────
   async function handleToggleEyeTracking() {
     const next = !eyeTracking
@@ -1006,9 +1014,10 @@ export default function TestScreen() {
       {overlay && (
         <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
           <div className="flex items-center justify-between px-5 py-4 pointer-events-auto">
-            <Link
-              to="/test"
-              onClick={() => { sendCommand('abort'); stopMediaPipeRef.current?.() }}
+            <button
+              type="button"
+              onClick={handleBackToPreviousPage}
+              aria-label="Go back"
               className="w-8 h-8 flex items-center justify-center rounded-full
                 bg-white/8 border border-white/12 text-white/50
                 hover:text-white hover:bg-white/15 transition-all"
@@ -1016,7 +1025,7 @@ export default function TestScreen() {
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-            </Link>
+            </button>
 
             {runId && (
               <span className="text-white/15 text-xs font-mono">{runId.slice(0, 8)}…</span>
