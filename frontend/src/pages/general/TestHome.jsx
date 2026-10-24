@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
 import { useNavigate } from "react-router-dom";
-import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/apiCache";
+import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/Apicache";
 
 function getInitials(name = "") {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();

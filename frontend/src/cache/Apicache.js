@@ -4,7 +4,7 @@
 // tab, so a hard refresh always starts fresh.
 //
 // Usage:
-//   import { cachedFetch, invalidate, invalidatePrefix } from '../cache/apiCache'
+//   import { cachedFetch, invalidate, invalidatePrefix } from '../cache/Apicache'
 //
 //   // read (uses cache if fresh)
 //   const data = await cachedFetch(authFetch, '/api/patients/', { ttl: 5 * 60 * 1000 })

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API_BASE_URL from '../../config/api';
 import { useNavigate } from 'react-router-dom';
-import { cachedFetch, invalidate, invalidatePrefix } from '../../cache/apiCache';
+import { cachedFetch, invalidate, invalidatePrefix } from '../../cache/Apicache';
 
 const inputClass = `
   w-full px-3 py-2 rounded-lg text-sm
