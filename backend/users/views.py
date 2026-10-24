@@ -1,10 +1,14 @@
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, logout
+from django.http import HttpResponseRedirect
+from django.views import View
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from users.adapters import is_allowed_email
 
 User = get_user_model()
 
@@ -26,7 +30,7 @@ class TestLoginView(APIView):
 
         email = request.data.get("email")
 
-        if not email or not email.endswith("@ceu.edu.ph"):
+        if not email or not is_allowed_email(email):
             return Response(
                 {"error": "Must use a @ceu.edu.ph email"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -47,6 +51,27 @@ class TestLoginView(APIView):
                 "full_name": user.full_name,
                 "created": created,
             }
+        )
+
+
+class GoogleLoginCompleteView(View):
+    """
+    allauth lands here (LOGIN_REDIRECT_URL) after a successful Google login,
+    holding a Django session. The React app authenticates with JWTs, so swap
+    the session for a token pair and hand it to the frontend's /auth/callback.
+    Tokens go in the URL fragment, which browsers never send to servers.
+    """
+
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?error=google_failed")
+
+        refresh = RefreshToken.for_user(request.user)
+        logout(request)  # the session was only needed to get here
+
+        return HttpResponseRedirect(
+            f"{settings.FRONTEND_URL}/auth/callback"
+            f"#access={refresh.access_token}&refresh={refresh}"
         )
 
 
@@ -141,7 +166,7 @@ class UserManagementListCreateView(APIView):
 
         if not email:
             return Response({"error": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
-        if not email.endswith("@ceu.edu.ph"):
+        if not is_allowed_email(email):
             return Response({"error": "Must be a @ceu.edu.ph email."}, status=status.HTTP_400_BAD_REQUEST)
         if role not in {"admin", "clinician", "viewer"}:
             return Response({"error": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)

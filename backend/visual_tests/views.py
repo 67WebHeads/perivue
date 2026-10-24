@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
+import hmac
 import subprocess
 import sys
 import os
@@ -37,6 +38,11 @@ from .serializers import (
 )
 
 _mediapipe_process = None
+
+# Hosted mode (settings.TRACKER_TOKEN set): the run the clinic laptop's
+# tracker_agent.py should be tracking — {"run_id": str, "eye": str} or None.
+# In-memory like _mediapipe_process, so the server must run a single process.
+_tracker_job = None
 
 # In-memory tracker health per run (like _mediapipe_process, this assumes the
 # single-process dev server): run_id -> {"camera_ok": bool|None, "last_seen": epoch}.
@@ -63,9 +69,14 @@ class MediaPipeStartView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, run_pk):
-        global _mediapipe_process
+        global _mediapipe_process, _tracker_job
 
         run = get_object_or_404(TestRun, pk=run_pk)
+
+        # Hosted backend: no webcam here, so queue the run for tracker_agent.py
+        if settings.TRACKER_TOKEN:
+            _tracker_job = {"run_id": str(run.id), "eye": run.eye}
+            return Response({"ok": True, "remote": True})
 
         # Kill any existing MediaPipe process
         if _mediapipe_process and _mediapipe_process.poll() is None:
@@ -115,7 +126,13 @@ class MediaPipeStopView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, run_pk):
-        global _mediapipe_process
+        global _mediapipe_process, _tracker_job
+
+        if settings.TRACKER_TOKEN:
+            stopped = _tracker_job is not None and _tracker_job["run_id"] == str(run_pk)
+            if stopped:
+                _tracker_job = None
+            return Response({"ok": True, "stopped": stopped, "remote": True})
 
         if _mediapipe_process and _mediapipe_process.poll() is None:
             _mediapipe_process.terminate()
@@ -123,6 +140,26 @@ class MediaPipeStopView(APIView):
             return Response({"ok": True, "stopped": True})
 
         return Response({"ok": True, "stopped": False})
+
+
+class TrackerJobView(APIView):
+    """
+    GET /api/visual-tests/tracker/job/
+    Polled by tracker_agent.py on the clinic laptop (hosted mode only) to learn
+    which run to track. Authenticated by the shared X-Tracker-Token header
+    instead of a user JWT, since the agent runs unattended.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        token = request.headers.get("X-Tracker-Token", "")
+        if not settings.TRACKER_TOKEN or not hmac.compare_digest(
+            token, settings.TRACKER_TOKEN
+        ):
+            return Response({"error": "Invalid tracker token"}, status=status.HTTP_403_FORBIDDEN)
+
+        return Response(_tracker_job or {"run_id": None, "eye": None})
 
 
 # ─── Protocols ────────────────────────────────────────────────────────────────

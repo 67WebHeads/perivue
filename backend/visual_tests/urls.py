@@ -62,6 +62,8 @@ urlpatterns = [
         views.MediaPipeStopView.as_view(),
         name="mediapipe-stop",
     ),
+    # Hosted mode — tracker_agent.py on the clinic laptop polls for its run
+    path("tracker/job/", views.TrackerJobView.as_view(), name="tracker-job"),
     path(
         "sessions/<uuid:pk>/results/",
         views.SessionResultsView.as_view(),
