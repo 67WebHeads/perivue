@@ -1,0 +1,19 @@
+# Packages the hosted backend (Render) needs — only what the Django apps import.
+# requirements.txt also has the webcam/MediaPipe and PDF tooling, which can't
+# build on a Linux server (pycairo has no Linux wheel) and isn't used there.
+# If you add a package the Django code imports, add it here too.
+asgiref==3.11.1
+certifi==2026.2.25
+dj-rest-auth==7.1.1
+Django==6.0.3
+django-allauth[socialaccount]==65.14.3
+django-cors-headers==4.9.0
+djangorestframework==3.16.1
+djangorestframework_simplejwt==5.5.1
+gunicorn==25.1.0
+psycopg2-binary==2.9.11
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+requests==2.32.5
+sqlparse==0.5.5
+tzdata==2025.3

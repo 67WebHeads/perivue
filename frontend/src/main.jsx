@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import App from "./App.jsx";
 import Login from "./pages/auth/Login.jsx";
+import AuthCallback from "./pages/auth/AuthCallback.jsx";
 import CompleteProfile from "./pages/general/CompleteProfile";
 import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
@@ -31,6 +32,7 @@ createRoot(document.getElementById("root")).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/complete-profile" element={<CompleteProfile />} />
 
           {/* Protected routes inside Layout */}

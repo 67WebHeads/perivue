@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [tailwindcss()],
   server: {
     host: true,
+    allowedHosts: [".local"],
     watch: {
       usePolling: true,
       interval: 100

@@ -1,0 +1,51 @@
+# Render Blueprint for the PeriVue backend (free plan).
+# Render → New → Blueprint → pick this repo. Values marked sync: false are
+# asked for in the dashboard so secrets never live in the repo.
+services:
+  - type: web
+    name: perivue-api
+    runtime: python
+    plan: free
+    region: singapore # closest to the Philippines and the Supabase (Sydney) DB
+    rootDir: backend
+    buildCommand: pip install -r requirements-server.txt
+    # One process: the tracker handoff and camera status live in memory
+    startCommand: gunicorn config.wsgi:application --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TRACKER_TOKEN
+        generateValue: true
+      - key: DB_CONN_MAX_AGE
+        value: "60"
+      - key: FRONTEND_URL
+        sync: false
+      - key: EXTRA_ALLOWED_EMAILS
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_SECRET
+        sync: false
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false

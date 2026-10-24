@@ -23,7 +23,38 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 # This safely checks if DEBUG is set to the string "True" in your .env
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = []
+# Comma-separated in .env, e.g. ALLOWED_HOSTS=localhost,127.0.0.1,pabu.local
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if h.strip()
+]
+
+
+def _lan_ip():
+    """This laptop's current Wi-Fi IP (no packets are sent)."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+# Let other devices on the same network connect, even when the IP changes
+# between networks (school Wi-Fi, home Wi-Fi, phone hotspot).
+LAN_IP = _lan_ip()
+if LAN_IP:
+    ALLOWED_HOSTS.append(LAN_IP)
+
+# Render sets this to the service's public hostname (e.g. perivue-api.onrender.com)
+if os.getenv("RENDER_EXTERNAL_HOSTNAME"):
+    ALLOWED_HOSTS.append(os.getenv("RENDER_EXTERNAL_HOSTNAME"))
+
+# Where the React app lives — used for CORS and to send users back after Google login
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 # Application definition
 
@@ -93,6 +124,10 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": os.getenv("DB_HOST", "127.0.0.1"),
         "PORT": os.getenv("DB_PORT", "5432"),
+        # Reusing connections matters when the server is far from Supabase;
+        # keep 0 locally so dev servers don't hold pooler slots open
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "0")),
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -149,6 +184,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
 ]
+if FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
+
+# Allow the frontend when it is opened from another device on the local network
+# (e.g. http://192.168.1.23:5173), without hardcoding this laptop's current IP.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.local)(:(5173|4173))?$",
+]
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -184,12 +227,43 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 
-# Only allow CEU emails
+# Only allow CEU emails (plus EXTRA_ALLOWED_EMAILS below)
 SOCIALACCOUNT_ADAPTER = "users.adapters.CEUAccountAdapter"
 
-# Redirects
-LOGIN_REDIRECT_URL = "http://localhost:5173/dashboard"
-ACCOUNT_LOGOUT_REDIRECT_URL = "http://localhost:5173/login"
+# Comma-separated non-CEU emails that may also sign in (e.g. developers' Gmail).
+# Kept in .env / the host's env vars so personal emails aren't committed.
+EXTRA_ALLOWED_EMAILS = {
+    e.strip().lower()
+    for e in os.getenv("EXTRA_ALLOWED_EMAILS", "").split(",")
+    if e.strip()
+}
+
+# The frontend sends the browser to /accounts/google/login/ with a plain link,
+# so start the Google redirect straight away instead of showing allauth's
+# "Continue?" page
+SOCIALACCOUNT_LOGIN_ON_GET = True
+# Google verifies emails, so a Google login for an email that already has a
+# user row (e.g. created in User Management) logs in as that user
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+# Redirects — after Google login, GoogleLoginCompleteView swaps the Django
+# session for JWTs and sends the browser on to the React app
+LOGIN_REDIRECT_URL = "/api/users/google/complete/"
+ACCOUNT_LOGOUT_REDIRECT_URL = f"{FRONTEND_URL}/login"
+
+# Behind a hosting proxy (Render) — trust its HTTPS header so the Google
+# callback URL is built as https://
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+# Eye tracking on a hosted backend: the server has no webcam, so instead of
+# launching mediapipe_runner.py itself it hands the run to tracker_agent.py on
+# the clinic laptop. Setting this token turns that mode on.
+TRACKER_TOKEN = os.getenv("TRACKER_TOKEN", "")
 
 # Email Backend Configuration
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"

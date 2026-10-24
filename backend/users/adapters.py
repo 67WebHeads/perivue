@@ -1,5 +1,19 @@
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
-from rest_framework.exceptions import ValidationError
+from django.conf import settings
+from django.http import HttpResponseRedirect
+
+
+def is_allowed_email(email):
+    """@ceu.edu.ph accounts, plus the developer emails in EXTRA_ALLOWED_EMAILS."""
+    email = (email or "").strip().lower()
+    return email.endswith("@ceu.edu.ph") or email in settings.EXTRA_ALLOWED_EMAILS
+
+
+def _back_to_login(error):
+    return ImmediateHttpResponse(
+        HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?error={error}")
+    )
 
 
 class CEUAccountAdapter(DefaultSocialAccountAdapter):
@@ -7,10 +21,14 @@ class CEUAccountAdapter(DefaultSocialAccountAdapter):
     def pre_social_login(self, request, sociallogin):
         """Block non-CEU emails before anything is created."""
         email = sociallogin.account.extra_data.get("email", "")
-        if not email.endswith("@ceu.edu.ph"):
-            raise ValidationError(
-                "Only CEU email accounts (@ceu.edu.ph) are allowed to log in."
-            )
+        if not is_allowed_email(email):
+            raise _back_to_login("not_allowed")
+
+    def on_authentication_error(
+        self, request, provider, error=None, exception=None, extra_context=None
+    ):
+        """Cancelled or failed Google sign-in — show the error on the React login page."""
+        raise _back_to_login("google_failed")
 
     def save_user(self, request, sociallogin, form=None):
         """

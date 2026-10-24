@@ -18,6 +18,11 @@ function Login() {
   const expiredNotice = location.state?.sessionExpired
     ? "Your session expired. Please sign in again."
     : "";
+  // Set by the backend when Google sign-in is rejected or fails
+  const googleError = {
+    not_allowed: "Only @ceu.edu.ph accounts can sign in.",
+    google_failed: "Google sign-in didn't complete. Please try again.",
+  }[new URLSearchParams(location.search).get("error")];
 
   const handleGoogleLogin = () => {
     resetSessionExpired();
@@ -77,6 +82,12 @@ function Login() {
           <GoogleIcon fontSize="small" />
           <span>Sign in with Google</span>
         </button>
+
+        {googleError && (
+          <p className="w-full rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-2 text-center text-xs text-red-200">
+            {googleError}
+          </p>
+        )}
 
         {expiredNotice && (
           <p className="w-full rounded-xl border border-yellow-400/25 bg-yellow-400/10 px-4 py-2 text-center text-xs text-yellow-200">
