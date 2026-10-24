@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
-import { cachedFetch } from "../../cache/apiCache";
+import { cachedFetch } from "../../cache/Apicache";
 
 function StatCard({ title, value, period, trend, icon, loading }) {
   const trendUp = trend > 0;

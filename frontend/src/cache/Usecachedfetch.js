@@ -10,7 +10,7 @@
 //   )
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { cachedFetch } from './apiCache'
+import { cachedFetch } from './Apicache'
 
 /**
  * @param {Function}      authFetch  - authenticated fetch wrapper from AuthContext
