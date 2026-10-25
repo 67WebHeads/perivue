@@ -265,6 +265,18 @@ if not DEBUG:
 # the clinic laptop. Setting this token turns that mode on.
 TRACKER_TOKEN = os.getenv("TRACKER_TOKEN", "")
 
+# With DEBUG off, Django only emails 500 errors to ADMINS — print them instead
+# so the traceback shows up in the host's logs (Render → Logs)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO"},
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
 # Email Backend Configuration
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.getenv("EMAIL_HOST")
