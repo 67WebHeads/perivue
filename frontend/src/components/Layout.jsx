@@ -8,6 +8,7 @@ import GroupIcon from "@mui/icons-material/Group";
 import LogoutIcon from "@mui/icons-material/Logout";
 import TrackChangesIcon from "@mui/icons-material/TrackChanges";
 import ManageAccountsIcon from "@mui/icons-material/ManageAccounts";
+import SettingsIcon from "@mui/icons-material/Settings";
 
 function getInitials(name = "", email = "") {
   const source = name.trim() || email.trim();
@@ -64,6 +65,7 @@ function Layout() {
     ...(user?.role === "admin" ? [
       { path: "/users", label: "User Management", icon: <ManageAccountsIcon /> }
     ] : []),
+    { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
   ];
 
   useEffect(() => {
