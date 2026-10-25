@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
+import { BROWSER_TRACKING, startBrowserTracker } from '../../tracking/browserTracker'
 
 const RINGS = [5, 10, 15, 20, 25, 30, 35]
 const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315]
@@ -254,6 +255,106 @@ function drawCalibrationTarget(canvas, sx, sy, pulse) {
   ctx.fill()
 }
 
+// ── Browser tracker panel ─────────────────────────────────────────────────────
+// Stands in for the Python runner's OpenCV preview window: camera view with the
+// tracked eye ringed, the untested eye greyed, the fixation box and gaze dot,
+// plus the runner's [F] flip / [R] re-learn keys as buttons. Shown only on the
+// start/pause overlay, never during trials.
+function trackerMessage(status) {
+  if (!status || status.phase === 'starting') {
+    return { tone: 'muted', text: 'Starting camera — allow camera access if the browser asks' }
+  }
+  if (status.phase === 'loading') return { tone: 'muted', text: 'Loading eye-tracking model…' }
+  if (status.phase === 'error') return { tone: 'bad', text: status.error }
+  if (status.feedIsBlack) {
+    return { tone: 'bad', text: "Camera picture is black — check the camera isn't covered or in use by another app" }
+  }
+  if (!status.facePresent) {
+    return { tone: 'warn', text: 'Camera OK — no face detected. Seat the patient facing the camera' }
+  }
+  if (status.occluded) {
+    return { tone: 'bad', text: 'Tested eye looks covered — the occluder goes over the OTHER eye' }
+  }
+  if (status.learning) {
+    return {
+      tone: 'warn',
+      text: `Learning centre gaze — cover the untested eye and have the patient look at the centre (${status.learning.count}/${status.learning.total})`,
+    }
+  }
+  if (!status.faceDetected) return { tone: 'warn', text: 'Camera OK — eye not readable (blink or glare?)' }
+  return {
+    tone: 'good',
+    text: `Camera OK — face detected · fixation ${status.fixating ? 'OK' : 'LOST'}${status.calibrated ? ' (calibrated)' : ''}`,
+  }
+}
+
+const TONE_CLASS = {
+  muted: 'text-white/45',
+  warn: 'text-amber-400/90',
+  bad: 'text-red-400',
+  good: 'text-emerald-400/90',
+}
+
+function BrowserTrackerPanel({ status, previewCanvasRef, trackerRef }) {
+  const [hidden, setHidden] = useState(
+    () => { try { return localStorage.getItem('perivue_tracker_preview') === 'off' } catch { return false } }
+  )
+  const msg = trackerMessage(status)
+  const running = status?.phase === 'running'
+
+  function toggleHidden() {
+    const next = !hidden
+    setHidden(next)
+    try { localStorage.setItem('perivue_tracker_preview', next ? 'off' : 'on') } catch { /* not persisted */ }
+  }
+
+  const btn = 'px-2.5 py-1 rounded-lg bg-white/8 border border-white/12 text-white/60 text-[11px] hover:bg-white/15 hover:text-white transition-all disabled:opacity-40'
+
+  return (
+    <div className="absolute left-5 bottom-5 z-20 w-72 pointer-events-auto
+      rounded-xl bg-black/70 border border-white/10 p-2.5 flex flex-col gap-2"
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      {!hidden && (
+        <canvas ref={previewCanvasRef} className="w-full aspect-video rounded-md bg-white/5" />
+      )}
+      <p className={`text-[11px] leading-snug ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
+      {running && status.offset && (
+        <p className="text-white/30 text-[10px] font-mono">
+          offset from centre: h={status.offset.h >= 0 ? '+' : ''}{status.offset.h.toFixed(3)}{' '}
+          v={status.offset.v >= 0 ? '+' : ''}{status.offset.v.toFixed(3)}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" className={btn} disabled={!running}
+          onClick={() => trackerRef.current?.toggleFlip()}
+          title="Use if the ringed eye is not the one being tested">
+          Flip left/right {status?.flip ? '(on)' : '(off)'}
+        </button>
+        <button type="button" className={btn} disabled={!running}
+          onClick={() => trackerRef.current?.relearn()}
+          title="Re-learn the patient's centre gaze after they shift or the occluder goes on">
+          Re-learn centre
+        </button>
+        <button type="button" className={btn} onClick={toggleHidden}>
+          {hidden ? 'Show camera' : 'Hide camera'}
+        </button>
+      </div>
+      {status?.cameras?.length > 1 && (
+        <select
+          value={status.cameraId || ''}
+          onChange={(e) => trackerRef.current?.setCamera(e.target.value)}
+          className="w-full rounded-lg bg-white/8 border border-white/12 text-white/70 text-[11px] px-2 py-1"
+        >
+          {status.cameras.map((c) => (
+            <option key={c.id} value={c.id} className="bg-neutral-900">{c.label}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
@@ -297,6 +398,13 @@ export default function TestScreen() {
   // Which eye this run tests — the tracker follows only that eye, so the other
   // one must be occluded before the baseline is taken
   const [runEye, setRunEye] = useState(null)
+
+  // ── In-browser tracker (VITE_EYE_TRACKER=browser) ─────────────────────────
+  // Replaces the Python runner on the hosted site: this page opens the webcam
+  // and posts fixation data itself. See tracking/browserTracker.js.
+  const browserTrackerRef = useRef(null)
+  const previewCanvasRef  = useRef(null)
+  const [browserStatus, setBrowserStatus] = useState(null)
 
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
@@ -384,7 +492,8 @@ export default function TestScreen() {
 
   // ── Stop MediaPipe ────────────────────────────────────────────────────────
   const stopMediaPipe = useCallback(async () => {
-    if (!runId) return
+    // Browser mode: the tracker effect below stops with the page / run
+    if (!runId || BROWSER_TRACKING) return
     try {
       await authFetch(
         `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/stop/`,
@@ -394,6 +503,27 @@ export default function TestScreen() {
   }, [runId, authFetch])
 
   useEffect(() => { stopMediaPipeRef.current = stopMediaPipe }, [stopMediaPipe])
+
+  // ── Browser tracker lifecycle ─────────────────────────────────────────────
+  // Runs while eye tracking is on and the run's eye is known (it decides which
+  // eye to follow). Stops on completion, toggle-off, or leaving the page.
+  useEffect(() => {
+    if (!BROWSER_TRACKING || !eyeTracking || !runId || !runEye || completed) return
+
+    const tracker = startBrowserTracker({
+      runId,
+      eye: runEye,
+      apiBase: API_BASE_URL,
+      onStatus: setBrowserStatus,
+      getPreviewCanvas: () => previewCanvasRef.current,
+    })
+    browserTrackerRef.current = tracker
+    return () => {
+      tracker.stop()
+      browserTrackerRef.current = null
+      setBrowserStatus(null)
+    }
+  }, [eyeTracking, runId, runEye, completed])
 
   // ── Batch submit — called once after all 40 points are done ──────────────
   const submitBatch = useCallback(async () => {
@@ -766,13 +896,16 @@ export default function TestScreen() {
   // ── Eye tracking toggle — starts/stops the MediaPipe process ─────────────
   async function setMediaPipeRunning(next) {
     if (!runId) return
-    try {
-      await authFetch(
-        `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/${next ? 'start' : 'stop'}/`,
-        { method: 'POST' }
-      )
-    } catch {
-      // Non-fatal — tracker status will show the current state.
+    // Browser mode: the tracker effect follows eyeTracking — no server process
+    if (!BROWSER_TRACKING) {
+      try {
+        await authFetch(
+          `${API_BASE_URL}/api/visual-tests/runs/${runId}/mediapipe/${next ? 'start' : 'stop'}/`,
+          { method: 'POST' }
+        )
+      } catch {
+        // Non-fatal — tracker status will show the current state.
+      }
     }
     if (!next) setTracker({ running: false, camera_ok: null })
   }
@@ -950,8 +1083,16 @@ export default function TestScreen() {
     // clinician disabled eye tracking.
     if (eyeTrackingRef.current) {
       await setMediaPipeRunning(true)
-      // Give the tracker a moment to start and populate its state before calibration.
-      await new Promise(r => setTimeout(r, 700))
+      if (BROWSER_TRACKING) {
+        // The in-page tracker may still be loading its model or learning the
+        // centre baseline — calibrating before then samples nothing
+        setCalibMessage('Starting eye tracking…')
+        await browserTrackerRef.current?.whenReady(10000)
+        setCalibMessage('')
+      } else {
+        // Give the tracker a moment to start and populate its state before calibration.
+        await new Promise(r => setTimeout(r, 700))
+      }
       await runCalibration()
 
       // Calibration ends on a keypress, and the first stimulus used to follow
@@ -1168,6 +1309,15 @@ export default function TestScreen() {
         </div>
       )}
 
+      {/* Camera panel — browser tracking only, start/pause overlay only */}
+      {overlay && BROWSER_TRACKING && eyeTracking && (
+        <BrowserTrackerPanel
+          status={browserStatus}
+          previewCanvasRef={previewCanvasRef}
+          trackerRef={browserTrackerRef}
+        />
+      )}
+
       {/* Overlay */}
       {overlay && (
         <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
@@ -1246,18 +1396,19 @@ export default function TestScreen() {
                     Off — the test will run without fixation monitoring or calibration
                   </p>
                 )}
-                {eyeTracking && !tracker.running && (
+                {/* Browser mode reports camera status in the corner panel instead */}
+                {eyeTracking && !BROWSER_TRACKING && !tracker.running && (
                   <p className="text-amber-400/80 text-xs">
                     Eye tracker not running
                   </p>
                 )}
-                {eyeTracking && tracker.running && tracker.camera_ok === false && (
+                {eyeTracking && !BROWSER_TRACKING && tracker.running && tracker.camera_ok === false && (
                   <p className="text-red-400 text-xs text-center max-w-md">
                     Camera feed is black — give camera access to the app running Django
                     (System Settings → Privacy &amp; Security → Camera), then restart it
                   </p>
                 )}
-                {eyeTracking && tracker.running && tracker.camera_ok !== false && (
+                {eyeTracking && !BROWSER_TRACKING && tracker.running && tracker.camera_ok !== false && (
                   <p className={`text-xs ${faceDetected ? 'text-emerald-400/90' : 'text-amber-400/80'}`}>
                     {faceDetected ? 'Camera OK — face detected' : 'Camera OK — no face detected'}
                   </p>

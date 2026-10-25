@@ -3,6 +3,7 @@ import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
 import { useNavigate } from "react-router-dom";
 import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/Apicache";
+import { BROWSER_TRACKING } from "../../tracking/browserTracker";
 
 function getInitials(name = "") {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
@@ -216,8 +217,8 @@ export default function TestHome() {
       invalidatePrefix(`${API_BASE_URL}/api/visual-tests/sessions/`);
       invalidate(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`);
 
-      // Step 3 — launch MediaPipe
-      if (localStorage.getItem('perivue_eye_tracking') !== 'off') {
+      // Step 3 — launch MediaPipe (browser mode: the canvas page tracks itself)
+      if (!BROWSER_TRACKING && localStorage.getItem('perivue_eye_tracking') !== 'off') {
         try {
           await authFetch(
             `${API_BASE_URL}/api/visual-tests/runs/${run.id}/mediapipe/start/`,
