@@ -15,6 +15,7 @@ import TestHome from "./pages/general/TestHome.jsx";
 import TestScreen from './pages/general/TestScreen.jsx';
 import TestResults from './pages/general/TestResults.jsx';
 import UserManagement from "./pages/general/UserManagement";
+import Settings from "./pages/general/Settings.jsx";
 import { useAuth } from "./context/AuthContext";
 
 // ── Admin-only route wrapper ──────────────────────────────────────────────────
@@ -46,6 +47,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="/dashboard"  element={<Dashboard />} />
             <Route path="/records"    element={<Records />} />
             <Route path="/test-menu"  element={<TestHome />} />
+            <Route path="/settings"   element={<Settings />} />
             <Route
               path="/users"
               element={

@@ -22,7 +22,8 @@ const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
 
 const FLIP_KEY = 'perivue_tracker_flip'
-const CAMERA_KEY = 'perivue_tracker_camera'
+// Also written by the Settings page's camera picker
+export const CAMERA_STORAGE_KEY = 'perivue_tracker_camera'
 
 // One eye's landmark indices. MediaPipe's own left/right naming refers to its
 // canonical model, and the frame may additionally be mirrored (see flip), so
@@ -239,7 +240,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
   const tinyCtx = tiny.getContext('2d', { willReadFrequently: true })
 
   let flipEnabled = readFlip()
-  let cameraId = safeGet(CAMERA_KEY)
+  let cameraId = safeGet(CAMERA_STORAGE_KEY)
   let cameras = []
 
   // Runner state
@@ -330,7 +331,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
       // A remembered camera that was unplugged — fall back to the default one
       if (cameraId && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
         cameraId = null
-        safeSet(CAMERA_KEY, null)
+        safeSet(CAMERA_STORAGE_KEY, null)
         return openCamera()
       }
       throw err
@@ -703,7 +704,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
     async setCamera(deviceId) {
       if (deviceId === cameraId) return
       cameraId = deviceId
-      safeSet(CAMERA_KEY, deviceId)
+      safeSet(CAMERA_STORAGE_KEY, deviceId)
       resetBaseline()
       // The pending frame callback belongs to the old stream — restart the loop
       cancelFrame()
