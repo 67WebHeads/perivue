@@ -927,15 +927,20 @@ export default function TestScreen() {
         window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('mousedown', onMouse, true)
       }
+      // stopPropagation: the code after this press can start a trial straight
+      // away, and the same event must not then reach handleResponse and score
+      // that trial as "seen"
       function onKey(e) {
         if (e.code !== 'Space' && e.code !== 'Enter') return
         e.preventDefault()
+        e.stopPropagation()
         cleanup()
         resolve()
       }
       function onMouse(e) {
         if (e.button !== 0) return
         if (e.target?.closest?.('[data-calibration-cancel]')) return
+        e.stopPropagation()
         cleanup()
         resolve()
       }
@@ -944,14 +949,30 @@ export default function TestScreen() {
     })
   }
 
-  // Sample raw iris ratios from the state endpoint: 8 reads at 150ms
-  // intervals, skip nulls (no face), need at least 4 to accept. The tracker
-  // is shaky even on a still eye, so use the median — one blink or landmark
-  // spike can't drag the calibration point the way a mean would.
+  // Sample raw iris ratios: 8 reads at 150ms intervals, skip nulls (no face),
+  // need at least 4 to accept. The tracker is shaky even on a still eye, so
+  // use the median — one blink or landmark spike can't drag the calibration
+  // point the way a mean would.
   function median(values) {
     const sorted = [...values].sort((a, b) => a - b)
     const mid = Math.floor(sorted.length / 2)
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  }
+
+  // The in-page tracker has the reading right here; the Python runner's only
+  // reaches this page through the state endpoint
+  async function readIrisRatios() {
+    if (browserTrackerRef.current) return browserTrackerRef.current.latestReading()
+    try {
+      const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
+      if (res.ok) {
+        const state = await res.json()
+        if (state.raw_h != null && state.raw_v != null) {
+          return { h: state.raw_h, v: state.raw_v }
+        }
+      }
+    } catch { /* failed read — counts as a skipped sample */ }
+    return null
   }
 
   async function sampleIrisRatios() {
@@ -961,16 +982,11 @@ export default function TestScreen() {
     const hs = []
     const vs = []
     for (let i = 0; i < 8; i++) {
-      try {
-        const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/state/`)
-        if (res.ok) {
-          const state = await res.json()
-          if (state.raw_h != null && state.raw_v != null) {
-            hs.push(state.raw_h)
-            vs.push(state.raw_v)
-          }
-        }
-      } catch { /* failed read — counts as a skipped sample */ }
+      const reading = await readIrisRatios()
+      if (reading) {
+        hs.push(reading.h)
+        vs.push(reading.v)
+      }
       await new Promise(r => setTimeout(r, 150))
     }
     if (hs.length < 4) return null
