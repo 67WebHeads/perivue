@@ -8,12 +8,14 @@
 // The algorithm, constants and their reasoning are carried over from the
 // Python runner one-to-one; keep the two in sync when tuning either.
 //
-// Enabled with VITE_EYE_TRACKER=browser. Without it the Python runner (started
-// by the backend, or by tracker_agent.py in hosted mode) is used as before.
-
-import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
-
-export const BROWSER_TRACKING = import.meta.env.VITE_EYE_TRACKER === 'browser'
+// Used automatically on https:// — the hosted site's server has no webcam, so
+// the page has to track by itself. Plain http:// (./start-lan.sh, npm run dev)
+// keeps the Python runner the backend starts; browsers refuse the camera on an
+// http:// LAN address anyway. VITE_EYE_TRACKER=browser or =server forces a mode.
+const TRACKER_MODE = import.meta.env.VITE_EYE_TRACKER
+export const BROWSER_TRACKING = TRACKER_MODE
+  ? TRACKER_MODE === 'browser'
+  : window.location.protocol === 'https:'
 
 // Keep in sync with the @mediapipe/tasks-vision version in package.json
 const MP_VERSION = '0.10.35'
@@ -219,7 +221,8 @@ function cameraErrorMessage(err) {
 
 /**
  * Starts tracking for one run. Returns controls:
- *   stop(), toggleFlip(), relearn(), setCamera(deviceId), whenReady(timeoutMs)
+ *   stop(), toggleFlip(), relearn(), setCamera(deviceId), whenReady(timeoutMs),
+ *   latestReading()
  * onStatus(status) is called whenever the displayed state changes.
  * getPreviewCanvas() may return a <canvas> to draw the camera preview into.
  */
@@ -367,6 +370,8 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
   }
 
   async function createLandmarker() {
+    // Loaded on demand so only the test page pays for this large library
+    const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision')
     const fileset = await FilesetResolver.forVisionTasks(WASM_BASE)
     const options = (delegate) => ({
       baseOptions: { modelAssetPath: MODEL_URL, delegate },
@@ -721,6 +726,13 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
         error = cameraErrorMessage(err)
       }
       emitStatus()
+    },
+    // The smoothed ratios being posted as raw_h/raw_v, or null with no reading.
+    // Calibration samples these directly — through the hosted backend each
+    // read takes ~0.5s, stretching a dot's 8 samples from ~1s to ~5s
+    latestReading() {
+      if (!faceDetected || emaH === null || emaV === null) return null
+      return { h: round4(emaH), v: round4(emaV) }
     },
     // Resolves once the center baseline is learned (or on error / timeout),
     // so calibration doesn't start before the tracker has any readings
