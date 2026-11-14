@@ -1,6 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import VideocamIcon from "@mui/icons-material/Videocam";
+import CastIcon from "@mui/icons-material/Cast";
+import TuneIcon from "@mui/icons-material/Tune";
+import StimulusPreview from "../../components/StimulusPreview";
 import { BROWSER_TRACKING, CAMERA_STORAGE_KEY } from "../../tracking/browserTracker";
+import {
+  STIMULUS_COLORS,
+  STIMULUS_COLOR_KEY,
+  DEFAULT_STIMULUS_COLOR,
+  TANGENT_OPACITY_KEY,
+  stimulusCss,
+  readPref,
+  VIEWING_DISTANCE_KEY,
+  MIN_VIEWING_DISTANCE_CM,
+  MAX_VIEWING_DISTANCE_CM,
+  projectionFor,
+  readViewingDistance,
+  savePref,
+} from "../../config/projection";
 
 // Browser camera permission for in-page eye tracking. Lets the clinician grant
 // access and check the picture before a patient sits down, instead of meeting
@@ -260,6 +277,240 @@ function CameraSettings() {
   );
 }
 
+// ── Test display (opacity, stimulus colour) with a live preview ──────────────
+// Same saved values the canvas's gear panel uses, and the same drawing code as
+// the projected canvas, so the preview is what the patient will see.
+
+function readOpacity() {
+  const n = Number(readPref(TANGENT_OPACITY_KEY, 100));
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 100;
+}
+
+function TestDisplaySettings() {
+  const [opacity, setOpacity] = useState(readOpacity);
+  const [color, setColor] = useState(() => readPref(STIMULUS_COLOR_KEY, DEFAULT_STIMULUS_COLOR));
+  function handleOpacity(e) {
+    const n = Number(e.target.value);
+    setOpacity(n);
+    savePref(TANGENT_OPACITY_KEY, n);
+  }
+
+  function handleColor(e) {
+    setColor(e.target.value);
+    savePref(STIMULUS_COLOR_KEY, e.target.value);
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-3xl border border-zinc-400/10 bg-white/5 p-5">
+      <div className="flex items-center gap-3">
+        <span className="text-base-content/50">
+          <TuneIcon />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Test display</p>
+          <p className="text-xs text-base-content/50">
+            How the tangent screen and stimulus look on the projector
+          </p>
+        </div>
+      </div>
+
+      <StimulusPreview opacity={opacity} color={color} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="settings-opacity" className="text-sm">Tangent screen opacity</label>
+            <span className="text-xs font-mono tabular-nums text-base-content/60">{opacity}%</span>
+          </div>
+          <input
+            id="settings-opacity"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={opacity}
+            onChange={handleOpacity}
+            className="w-full accent-purple-500"
+          />
+          <p className="text-xs text-base-content/40">
+            Fades the grid. The stimulus stays at full brightness.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="settings-stimulus-color" className="text-sm">Stimulus colour</label>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-4 w-4 rounded-full border border-white/20 shrink-0"
+              style={{ backgroundColor: stimulusCss(color) }}
+              aria-hidden="true"
+            />
+            <select
+              id="settings-stimulus-color"
+              value={color}
+              onChange={handleColor}
+              className="flex-1 rounded-xl bg-white/10 border border-white/20 text-sm px-3 py-2"
+            >
+              {STIMULUS_COLORS.map((c) => (
+                <option key={c.value} value={c.value} className="bg-neutral-900">
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-base-content/40">Saved with each test result.</p>
+        </div>
+      </div>
+
+      <p className="text-xs text-base-content/40">
+        These settings are saved in this browser and used by the next test. You can also
+        change them during a test from the gear icon on the test screen.
+      </p>
+    </div>
+  );
+}
+
+// ── Projector setup guide ─────────────────────────────────────────────────────
+// The canvas sizes the grid to the window, so its real size on the wall depends
+// entirely on the projector. This works out the measurements that make the
+// projected degrees match the patient's viewing distance.
+const cm = (n) => `${n.toFixed(1)} cm`;
+
+function ProjectorSetup() {
+  const [distance, setDistance] = useState(readViewingDistance);
+  const [draft, setDraft] = useState(String(readViewingDistance()));
+
+  const valid =
+    draft.trim() !== "" &&
+    Number(draft) >= MIN_VIEWING_DISTANCE_CM &&
+    Number(draft) <= MAX_VIEWING_DISTANCE_CM;
+
+  function handleDistanceChange(e) {
+    const value = e.target.value;
+    setDraft(value);
+    const n = Number(value);
+    if (value.trim() !== "" && n >= MIN_VIEWING_DISTANCE_CM && n <= MAX_VIEWING_DISTANCE_CM) {
+      setDistance(n);
+      savePref(VIEWING_DISTANCE_KEY, n);
+    }
+  }
+
+  const p = projectionFor(distance);
+  const ten = p.rings.find((r) => r.deg === 10);
+
+  return (
+    <div className="flex flex-col gap-4 rounded-3xl border border-zinc-400/10 bg-white/5 p-5">
+      <div className="flex items-center gap-3">
+        <span className="text-base-content/50">
+          <CastIcon />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Projector setup</p>
+          <p className="text-xs text-base-content/50">
+            Size the projected tangent screen so each ring matches its angle in degrees
+          </p>
+        </div>
+      </div>
+
+      <label htmlFor="viewing-distance" className="flex flex-wrap items-center gap-3 text-sm">
+        <span>Patient viewing distance</span>
+        <span className="flex items-center gap-2">
+          <input
+            id="viewing-distance"
+            type="number"
+            inputMode="numeric"
+            min={MIN_VIEWING_DISTANCE_CM}
+            max={MAX_VIEWING_DISTANCE_CM}
+            step="1"
+            value={draft}
+            onChange={handleDistanceChange}
+            className="w-24 rounded-xl bg-white/10 border border-white/20 px-3 py-2 text-sm"
+          />
+          <span className="text-base-content/50">cm</span>
+        </span>
+        <span className="text-xs text-base-content/40">
+          From the patient&apos;s eye to the screen. 100 cm is standard.
+        </span>
+      </label>
+      {!valid && (
+        <p className="text-xs text-error">
+          Enter a distance between {MIN_VIEWING_DISTANCE_CM} and {MAX_VIEWING_DISTANCE_CM} cm.
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          ["Outer 35° ring", cm(p.outerDiameter), "Diameter on the screen"],
+          ["Projected image height", cm(p.imageHeight), "Top to bottom of the picture"],
+          ["Projected image width", cm(p.imageWidth16x9), `16:9 projector (16:10: ${cm(p.imageWidth16x10)})`],
+        ].map(([label, value, sub]) => (
+          <div key={label} className="rounded-2xl bg-white/5 border border-white/10 px-4 py-3">
+            <p className="text-xs text-base-content/50">{label}</p>
+            <p className="text-lg font-medium tabular-nums">{value}</p>
+            <p className="text-xs text-base-content/40">{sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <ol className="flex flex-col gap-2 text-sm text-base-content/80 list-decimal pl-5">
+        <li>
+          Seat the patient so their eye is <b>{distance} cm</b> from the screen, level with
+          the centre of the projected picture.
+        </li>
+        <li>
+          Start a test and press <b>F11</b> on the canvas so it fills the whole projector
+          picture. The grid sizes itself to the window, so do this before measuring.
+        </li>
+        <li>
+          Adjust the projector&apos;s zoom and distance until the outer 35° ring measures{" "}
+          <b>{cm(p.outerDiameter)}</b> across. That makes the whole picture about{" "}
+          {cm(p.imageHeight)} tall.
+        </li>
+        <li>
+          Measure the ring both horizontally and vertically. If the two differ, fix the
+          projector&apos;s keystone or tilt until they match.
+        </li>
+        <li>
+          Check: the 10° ring should measure about <b>{cm(ten.canvasDiameter)}</b> across.
+        </li>
+        <li>
+          Make sure the centre cross sits at the patient&apos;s eye level, then don&apos;t
+          move the projector, screen or chair between patients.
+        </li>
+      </ol>
+
+      <details className="text-xs text-base-content/60">
+        <summary className="cursor-pointer text-base-content/70">Size of every ring</summary>
+        <div className="mt-2 overflow-x-auto">
+          <table className="text-left tabular-nums">
+            <thead className="text-base-content/50">
+              <tr>
+                <th className="pr-6 py-1 font-medium">Ring</th>
+                <th className="pr-6 py-1 font-medium">PeriVue projection</th>
+                <th className="py-1 font-medium">Printed tangent screen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.rings.map((r) => (
+                <tr key={r.deg} className="border-t border-white/5">
+                  <td className="pr-6 py-1">{r.deg}°</td>
+                  <td className="pr-6 py-1">{cm(r.canvasDiameter)}</td>
+                  <td className="py-1">{cm(r.tangentDiameter)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2">
+          PeriVue spaces its rings evenly, while a printed tangent screen spaces them by the
+          tangent of the angle. With the outer ring matched, the inner rings come out slightly
+          larger than on a printed screen.
+        </p>
+      </details>
+    </div>
+  );
+}
+
 function Settings() {
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
@@ -267,6 +518,8 @@ function Settings() {
         <h1 className="text-xl font-medium">Settings</h1>
         <p className="text-sm text-base-content/50">Settings for this browser on this device</p>
       </div>
+      <TestDisplaySettings />
+      <ProjectorSetup />
       <CameraSettings />
     </div>
   );

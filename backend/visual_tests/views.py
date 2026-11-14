@@ -32,6 +32,7 @@ from .serializers import (
     TestProtocolCreateSerializer,
     TestSessionListSerializer,
     TestSessionCreateSerializer,
+    TestSessionNotesUpdateSerializer,
     TestRunSerializer,
     TestRunStateSerializer,
     FixationEventSerializer,
@@ -245,6 +246,19 @@ class SessionDetailView(APIView):
             pk=pk,
         )
         return Response(TestSessionListSerializer(session).data)
+
+    def patch(self, request, pk):
+        session = get_object_or_404(
+            TestSession.objects.select_related("patient", "protocol", "performed_by"),
+            pk=pk,
+        )
+        serializer = TestSessionNotesUpdateSerializer(
+            session, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(TestSessionListSerializer(session).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ─── Runs ─────────────────────────────────────────────────────────────────────
@@ -477,6 +491,7 @@ class TrialResultBatchView(APIView):
                 "angle_deg": t.get("angle_deg"),
                 "start_radius_deg": t.get("start_radius_deg"),
                 "is_blindspot_check": t.get("is_blindspot_check", False),
+                "stimulus_color": t.get("stimulus_color"),
                 "result": t.get("result"),
                 "response_time_ms": t.get("response_time_ms"),
                 "boundary_x_deg": t.get("boundary_x_deg"),
@@ -901,7 +916,8 @@ class SessionResultsView(APIView):
                     "id": str(session.id),
                     "session_datetime": session.session_datetime,
                     "eye": session.eye,
-                    "notes": session.notes,
+                    "examiner_notes": session.examiner_notes,
+                    "patient_notes": session.patient_notes,
                     "protocol_name": session.protocol.name,
                     "performed_by": (
                         session.performed_by.full_name if session.performed_by else None
