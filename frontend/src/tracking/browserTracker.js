@@ -555,11 +555,14 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
   function drawPreview(frame) {
     const canvas = getPreviewCanvas?.()
     if (!canvas || !frame) return
-    const dpr = window.devicePixelRatio || 1
-    const cw = Math.round(canvas.clientWidth * dpr)
-    const ch = Math.round(canvas.clientHeight * dpr)
+    // A canvas on the page follows its CSS size; a detached one (the camera
+    // monitor's frame source) keeps the size it was created with
+    const onPage = canvas.clientWidth > 0
+    const dpr = onPage ? window.devicePixelRatio || 1 : canvas.width / 320
+    const cw = onPage ? Math.round(canvas.clientWidth * dpr) : canvas.width
+    const ch = onPage ? Math.round(canvas.clientHeight * dpr) : canvas.height
     if (!cw || !ch) return
-    if (canvas.width !== cw || canvas.height !== ch) {
+    if (onPage && (canvas.width !== cw || canvas.height !== ch)) {
       canvas.width = cw
       canvas.height = ch
     }

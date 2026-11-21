@@ -2,7 +2,8 @@ import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ToastProvider } from "./context/ToastContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import App from "./App.jsx";
 import Login from "./pages/auth/Login.jsx";
@@ -12,19 +13,21 @@ import Dashboard from "./pages/general/Dashboard.jsx";
 import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
 import TestHome from "./pages/general/TestHome.jsx";
-import TestScreen from './pages/general/TestScreen.jsx';
-import TestResults from './pages/general/TestResults.jsx';
+import TestScreen from "./pages/general/TestScreen.jsx";
+import CameraMonitor from "./pages/general/CameraMonitor.jsx";
+import TestResults from "./pages/general/TestResults.jsx";
 import UserManagement from "./pages/general/UserManagement";
 import Settings from "./pages/general/Settings.jsx";
-import { useAuth } from "./context/AuthContext";
-import { ToastProvider } from "./context/ToastContext";
 
-// ── Admin-only route wrapper ──────────────────────────────────────────────────
 function AdminRoute({ children }) {
-  const { user } = useAuth()
-  if (!user) return null
-  if (user.role !== "admin") return <Navigate to="/dashboard" replace />
-  return children
+  const { user } = useAuth();
+
+  if (!user) return null;
+  if (user.role !== "admin") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
 }
 
 createRoot(document.getElementById("root")).render(
@@ -36,7 +39,10 @@ createRoot(document.getElementById("root")).render(
             <Route path="/" element={<App />} />
             <Route path="/login" element={<Login />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route path="/complete-profile" element={<CompleteProfile />} />
+            <Route
+              path="/complete-profile"
+              element={<CompleteProfile />}
+            />
 
             {/* Protected routes inside Layout */}
             <Route
@@ -46,10 +52,10 @@ createRoot(document.getElementById("root")).render(
                 </ProtectedRoute>
               }
             >
-              <Route path="/dashboard"  element={<Dashboard />} />
-              <Route path="/records"    element={<Records />} />
-              <Route path="/test-menu"  element={<TestHome />} />
-              <Route path="/settings"   element={<Settings />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/records" element={<Records />} />
+              <Route path="/test-menu" element={<TestHome />} />
+              <Route path="/settings" element={<Settings />} />
               <Route
                 path="/users"
                 element={
@@ -61,7 +67,8 @@ createRoot(document.getElementById("root")).render(
             </Route>
 
             {/* Fullscreen routes — no layout */}
-            <Route path="/test/canvas"  element={<TestScreen />} />
+            <Route path="/test/canvas" element={<TestScreen />} />
+            <Route path="/test/camera" element={<CameraMonitor />} />
             <Route path="/test/results" element={<TestResults />} />
           </Routes>
         </AuthProvider>

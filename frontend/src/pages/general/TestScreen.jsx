@@ -4,6 +4,14 @@ import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 import { BROWSER_TRACKING, startBrowserTracker } from '../../tracking/browserTracker'
 import {
+  MONITOR_CHANNEL,
+  MONITOR_COMMANDS,
+  MONITOR_TIMEOUT_MS,
+  TONE_CLASS,
+  openCameraMonitor,
+  trackerMessage,
+} from '../../tracking/cameraMonitor'
+import {
   STIMULUS_COLORS, STIMULUS_COLOR_KEY, DEFAULT_STIMULUS_COLOR, TANGENT_OPACITY_KEY,
   stimulusCss, readPref, savePref, readViewingDistance, projectionFor,
 } from '../../config/projection'
@@ -162,106 +170,6 @@ function drawCalibrationTarget(canvas, sx, sy, pulse) {
   ctx.fill()
 }
 
-// ── Browser tracker panel ─────────────────────────────────────────────────────
-// Stands in for the Python runner's OpenCV preview window: camera view with the
-// tracked eye ringed, the untested eye greyed, the fixation box and gaze dot,
-// plus the runner's [F] flip / [R] re-learn keys as buttons. Shown only on the
-// start/pause overlay, never during trials.
-function trackerMessage(status) {
-  if (!status || status.phase === 'starting') {
-    return { tone: 'muted', text: 'Starting camera — allow camera access if the browser asks' }
-  }
-  if (status.phase === 'loading') return { tone: 'muted', text: 'Loading eye-tracking model…' }
-  if (status.phase === 'error') return { tone: 'bad', text: status.error }
-  if (status.feedIsBlack) {
-    return { tone: 'bad', text: "Camera picture is black — check the camera isn't covered or in use by another app" }
-  }
-  if (!status.facePresent) {
-    return { tone: 'warn', text: 'Camera OK — no face detected. Seat the patient facing the camera' }
-  }
-  if (status.occluded) {
-    return { tone: 'bad', text: 'Tested eye looks covered — the occluder goes over the OTHER eye' }
-  }
-  if (status.learning) {
-    return {
-      tone: 'warn',
-      text: `Learning centre gaze — cover the untested eye and have the patient look at the centre (${status.learning.count}/${status.learning.total})`,
-    }
-  }
-  if (!status.faceDetected) return { tone: 'warn', text: 'Camera OK — eye not readable (blink or glare?)' }
-  return {
-    tone: 'good',
-    text: `Camera OK — face detected · fixation ${status.fixating ? 'OK' : 'LOST'}${status.calibrated ? ' (calibrated)' : ''}`,
-  }
-}
-
-const TONE_CLASS = {
-  muted: 'text-white/45',
-  warn: 'text-amber-400/90',
-  bad: 'text-red-400',
-  good: 'text-emerald-400/90',
-}
-
-function BrowserTrackerPanel({ status, previewCanvasRef, trackerRef }) {
-  const [hidden, setHidden] = useState(
-    () => { try { return localStorage.getItem('perivue_tracker_preview') === 'off' } catch { return false } }
-  )
-  const msg = trackerMessage(status)
-  const running = status?.phase === 'running'
-
-  function toggleHidden() {
-    const next = !hidden
-    setHidden(next)
-    try { localStorage.setItem('perivue_tracker_preview', next ? 'off' : 'on') } catch { /* not persisted */ }
-  }
-
-  const btn = 'px-2.5 py-1 rounded-lg bg-white/8 border border-white/12 text-white/60 text-[11px] hover:bg-white/15 hover:text-white transition-all disabled:opacity-40'
-
-  return (
-    <div className="absolute left-5 bottom-5 z-20 w-72 pointer-events-auto
-      rounded-xl bg-black/70 border border-white/10 p-2.5 flex flex-col gap-2"
-      onDoubleClick={(e) => e.stopPropagation()}
-    >
-      {!hidden && (
-        <canvas ref={previewCanvasRef} className="w-full aspect-video rounded-md bg-white/5" />
-      )}
-      <p className={`text-[11px] leading-snug ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
-      {running && status.offset && (
-        <p className="text-white/30 text-[10px] font-mono">
-          offset from centre: h={status.offset.h >= 0 ? '+' : ''}{status.offset.h.toFixed(3)}{' '}
-          v={status.offset.v >= 0 ? '+' : ''}{status.offset.v.toFixed(3)}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" className={btn} disabled={!running}
-          onClick={() => trackerRef.current?.toggleFlip()}
-          title="Use if the ringed eye is not the one being tested">
-          Flip left/right {status?.flip ? '(on)' : '(off)'}
-        </button>
-        <button type="button" className={btn} disabled={!running}
-          onClick={() => trackerRef.current?.relearn()}
-          title="Re-learn the patient's centre gaze after they shift or the occluder goes on">
-          Re-learn centre
-        </button>
-        <button type="button" className={btn} onClick={toggleHidden}>
-          {hidden ? 'Show camera' : 'Hide camera'}
-        </button>
-      </div>
-      {status?.cameras?.length > 1 && (
-        <select
-          value={status.cameraId || ''}
-          onChange={(e) => trackerRef.current?.setCamera(e.target.value)}
-          className="w-full rounded-lg bg-white/8 border border-white/12 text-white/70 text-[11px] px-2 py-1"
-        >
-          {status.cameras.map((c) => (
-            <option key={c.id} value={c.id} className="bg-neutral-900">{c.label}</option>
-          ))}
-        </select>
-      )}
-    </div>
-  )
-}
-
 // ─── Pre-test instructions ────────────────────────────────────────────────────
 // Projected to the patient, so the text is large and plain. Opens from the
 // Begin test button; Start test then runs handleStart (calibration → trials).
@@ -272,6 +180,7 @@ function PreTestInstructions({ eye, eyeTracking, onBack, onStart }) {
     'Sit comfortably and keep your head still for the whole test.',
     coveredEye && `Keep your ${coveredEye} eye covered until the test is finished.`,
     'Always look at the cross in the centre. Do not move your eyes to search for the dots.',
+    'First you will check your button and do a short practice, so you know what the dots look like.',
     eyeTracking && 'First, a few dots will appear near the corners. Look at each one when asked. This lets the camera learn where you are looking.',
     'Press the button as soon as you see a dot, whether it flashes or slowly moves in from the edge.',
     'It is normal to miss some dots. Blink normally and stay relaxed.',
@@ -334,6 +243,209 @@ function PreTestInstructions({ eye, eyeTracking, onBack, onStart }) {
   )
 }
 
+// ─── Clicker check + practice run ─────────────────────────────────────────────
+// Before calibration the patient checks their response button, then does a
+// short run-through with the exam's own static stimulus (same colour, size and
+// 2 s response window). Practice dots sit at 10° — inside almost any field, so
+// a miss means the patient or the button, not a defect — and two "catch"
+// rounds show no dot at all, so presses without a stimulus are caught. Nothing
+// here is saved to the run; it is for the clinician to judge readiness.
+// The button check before it is open-ended so a clicker can be swapped.
+const PRACTICE_DOT_COUNT = 6
+const PRACTICE_CATCH_COUNT = 2
+const PRACTICE_RADIUS_DEG = 10
+const PRACTICE_RESPONSE_WINDOW_MS = 2000 // same as runStaticTrial
+const SLOW_RESPONSE_MS = 900
+const COUNTDOWN_SECONDS = 3
+
+function buildPracticeTrials() {
+  const angles = [...STATIC_ANGLES_DEG].sort(() => Math.random() - 0.5).slice(0, PRACTICE_DOT_COUNT)
+  const trials = angles.map((a) => {
+    const rad = (a * Math.PI) / 180
+    return { xDeg: PRACTICE_RADIUS_DEG * Math.cos(rad), yDeg: PRACTICE_RADIUS_DEG * Math.sin(rad) }
+  })
+  for (let i = 0; i < PRACTICE_CATCH_COUNT; i++) trials.push(null) // catch round
+  return trials.sort(() => Math.random() - 0.5)
+}
+
+function summarizePractice(results) {
+  const dots = results.filter((r) => r.target)
+  const rts = dots.filter((r) => r.kind === 'hit').map((r) => r.rt)
+  const falsePresses = results.reduce((n, r) => n + r.early + (r.kind === 'false_press' ? 1 : 0), 0)
+  const avg = rts.length ? Math.round(rts.reduce((a, b) => a + b, 0) / rts.length) : null
+
+  const hints = []
+  if (!rts.length) {
+    hints.push('No dots were answered — check the button is connected and the patient knows to press it.')
+  } else {
+    if (rts.length < dots.length) {
+      hints.push('Some dots were missed — check the patient is looking at the centre cross and can see the screen clearly.')
+    }
+    if (avg > SLOW_RESPONSE_MS) {
+      hints.push('Responses are slow — remind the patient to press as soon as a dot appears.')
+    }
+  }
+  if (falsePresses >= 2) {
+    hints.push('Several presses came without a dot — remind the patient to press only when they see one.')
+  }
+
+  return {
+    seen: rts.length,
+    total: dots.length,
+    avg,
+    fastest: rts.length ? Math.min(...rts) : null,
+    slowest: rts.length ? Math.max(...rts) : null,
+    falsePresses,
+    hints,
+    ready: rts.length === dots.length && avg <= SLOW_RESPONSE_MS && falsePresses < 2,
+  }
+}
+
+// Full-screen prompts for the steps between the instructions and the first
+// test point. Projected to the patient, so the text is large and plain.
+// Buttons marked data-ui-control are for the clinician; waitForPress ignores
+// clicks on them so they never count as the patient's button press.
+function StagePrompt({ stage, onChoice }) {
+  const card = (title, children, footer) => (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-black/75 backdrop-blur-sm cursor-auto p-6"
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <div role="dialog" aria-modal="true"
+        className="w-full max-w-xl rounded-2xl border border-white/12 bg-[#10101f] p-8 text-white text-center shadow-2xl">
+        {title}
+        {children}
+        {footer && <div className="mt-8">{footer}</div>}
+      </div>
+    </div>
+  )
+  const pressHint = (text) => (
+    <p className="text-sm text-purple-200/80 animate-pulse">{text}</p>
+  )
+  // 'skip' and 'next' are picked up by waitForPress (they must not count as a
+  // patient press); the rest go through onChoice
+  const clinicianBtn = (label, value, primary, disabled = false) => (
+    <button
+      type="button"
+      data-ui-control
+      data-stage-skip={value === 'skip' ? '' : undefined}
+      data-stage-next={value === 'next' && !disabled ? '' : undefined}
+      disabled={disabled}
+      onClick={() => value !== 'skip' && value !== 'next' && onChoice(value)}
+      className={`px-6 py-3 rounded-xl text-sm font-medium transition-all active:scale-95
+        disabled:opacity-35 disabled:cursor-not-allowed ${
+        primary
+          ? 'bg-purple-500/20 border border-purple-500/30 text-white hover:bg-purple-500/30'
+          : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+      }`}
+    >
+      {label}
+    </button>
+  )
+
+  switch (stage.kind) {
+    case 'device': {
+      const pressed = stage.presses > 0
+      return card(
+        <h2 className="text-2xl font-semibold">Check your button</h2>,
+        pressed ? (
+          <div className="mt-5">
+            {/* key: re-mounts on every press so each one visibly flashes */}
+            <p key={stage.presses} className="text-3xl font-semibold text-emerald-300 animate-[pulse_0.6s_ease-out_1]">
+              ✓ Your button works
+            </p>
+            <p className="mt-3 text-base text-white/60">
+              {stage.input === 'mouse' ? 'Mouse click' : 'Key press'} received
+              {' · '}{stage.presses} {stage.presses === 1 ? 'press' : 'presses'}
+            </p>
+            <p className="mt-4 text-sm text-white/40">Press again to keep testing.</p>
+          </div>
+        ) : (
+          <p className="mt-4 text-lg text-white/80">Press your button now.</p>
+        ),
+        <div className="flex flex-col items-center gap-4">
+          {!pressed && pressHint('Waiting for a press…')}
+          <p className="text-xs text-white/35 max-w-sm">
+            Examiner: if presses don&apos;t show up, swap the clicker and try again.
+            Press N or click Next when it works.
+          </p>
+          <div className="flex justify-center gap-3">
+            {clinicianBtn('Skip practice', 'skip')}
+            {clinicianBtn('Next (N)', 'next', true, !pressed)}
+          </div>
+        </div>,
+      )
+    }
+    case 'practiceIntro':
+      return card(
+        <h2 className="text-2xl font-semibold">Practice run</h2>,
+        <p className="mt-4 text-lg leading-snug text-white/80">
+          Keep looking at the centre cross. A few dots will flash — press your
+          button as soon as you see one. Sometimes no dot will appear.
+        </p>,
+        <div className="flex flex-col items-center gap-5">
+          {pressHint('Press your button to start the practice')}
+          {clinicianBtn('Skip practice', 'skip')}
+        </div>,
+      )
+    case 'practiceResult': {
+      const s = stage.summary
+      const stat = (label, value) => (
+        <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-3">
+          <div className="text-xl font-semibold tabular-nums">{value}</div>
+          <div className="text-[11px] text-white/40 mt-0.5">{label}</div>
+        </div>
+      )
+      return card(
+        <h2 className={`text-2xl font-semibold ${s.ready ? 'text-emerald-300' : 'text-amber-300'}`}>
+          {s.ready ? '✓ Practice complete' : 'Practice complete'}
+        </h2>,
+        <>
+          <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {stat('Dots seen', `${s.seen} / ${s.total}`)}
+            {stat('Average response', s.avg != null ? `${s.avg} ms` : '—')}
+            {stat('Fastest / slowest', s.fastest != null ? `${s.fastest}–${s.slowest}` : '—')}
+            {stat('Presses without a dot', s.falsePresses)}
+          </div>
+          {s.hints.length > 0 ? (
+            <ul className="mt-5 flex flex-col gap-1.5 text-sm text-amber-200/80 text-left">
+              {s.hints.map((h) => <li key={h}>• {h}</li>)}
+            </ul>
+          ) : (
+            <p className="mt-5 text-sm text-emerald-200/70">The button and response times look good.</p>
+          )}
+        </>,
+        <div className="flex justify-center gap-3">
+          {clinicianBtn('Practice again', 'again')}
+          {clinicianBtn('Continue', 'continue', true)}
+        </div>,
+      )
+    }
+    case 'calibrated':
+      return card(
+        <>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full
+            bg-emerald-500/15 border border-emerald-400/30 text-3xl text-emerald-300">✓</div>
+          <h2 className="text-2xl font-semibold text-emerald-300">Calibration successful</h2>
+        </>,
+        <p className="mt-3 text-lg text-white/75">The camera has learned where you are looking.</p>,
+        pressHint('Look at the centre cross, then press your button to continue'),
+      )
+    case 'countdown':
+      return card(
+        <h2 className="text-2xl font-semibold">The examination is about to begin</h2>,
+        <>
+          <div className="mt-6 text-7xl font-semibold tabular-nums text-purple-200">{stage.seconds}</div>
+          <p className="mt-6 text-lg text-white/75">
+            Keep looking at the centre cross and press your button whenever you see a dot.
+          </p>
+        </>,
+      )
+    default:
+      return null
+  }
+}
+
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
@@ -392,11 +504,34 @@ export default function TestScreen() {
   // Replaces the Python runner on the hosted site: this page opens the webcam
   // and posts fixation data itself. See tracking/browserTracker.js.
   const browserTrackerRef = useRef(null)
-  const previewCanvasRef  = useRef(null)
   const [browserStatus, setBrowserStatus] = useState(null)
+  // The camera preview is shown in a separate monitor window (/test/camera)
+  // so it never appears on the projector — see tracking/cameraMonitor.js
+  const [monitorOpen, setMonitorOpen] = useState(false)
 
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
+
+  // ── Pre-exam stages (clicker check, practice, calibrated, countdown) ──────
+  const [stage, setStage] = useState(null)
+  const stageChoiceRef = useRef(null)
+  // Set when the canvas unmounts (e.g. Cancel) so the practice loop stops.
+  // Reset on every mount: React's StrictMode (dev) mounts, unmounts and
+  // re-mounts each component, and a flag left set by that dry run made the
+  // button check quit at the first press.
+  const unmountedRef = useRef(false)
+  useEffect(() => {
+    unmountedRef.current = false
+    return () => { unmountedRef.current = true }
+  }, [])
+  // The button check runs until the clinician moves on: N key, the Next
+  // button, or Next in the camera monitor (which calls pressNextRef)
+  const buttonCheckRef = useRef({ running: false, presses: 0, input: null })
+  const pressNextRef = useRef(null)
+  const monitorChannelRef = useRef(null)
+  // Mirrors the button check into the camera monitor window
+  const postButtonCheck = () =>
+    monitorChannelRef.current?.postMessage({ type: 'buttonCheck', ...buttonCheckRef.current })
 
 
   // ── Trial refs ────────────────────────────────────────────────────────────
@@ -508,18 +643,66 @@ export default function TestScreen() {
   useEffect(() => {
     if (!BROWSER_TRACKING || !eyeTracking || !runId || !runEye || completed) return
 
+    // Off-page canvas the tracker draws its preview into; frames are copied
+    // from it to the camera monitor window while one is open
+    const preview = document.createElement('canvas')
+    preview.width = 640
+    preview.height = 360
+    const channel = new BroadcastChannel(MONITOR_CHANNEL)
+    monitorChannelRef.current = channel
+    let monitorSeenAt = 0
+    let latestStatus = null
+    const monitorAlive = () => Date.now() - monitorSeenAt < MONITOR_TIMEOUT_MS
+    const sendStatus = () =>
+      channel.postMessage({ type: 'status', runId, eye: runEye, status: latestStatus })
+
     const tracker = startBrowserTracker({
       runId,
       eye: runEye,
       apiBase: API_BASE_URL,
-      onStatus: setBrowserStatus,
-      getPreviewCanvas: () => previewCanvasRef.current,
+      onStatus: (status) => {
+        latestStatus = status
+        setBrowserStatus(status)
+        sendStatus()
+      },
+      // Skip drawing the preview entirely when nobody is watching
+      getPreviewCanvas: () => (monitorAlive() ? preview : null),
     })
     browserTrackerRef.current = tracker
+
+    channel.onmessage = ({ data }) => {
+      if (data?.type === 'hello') {
+        monitorSeenAt = Date.now()
+        sendStatus()
+        postButtonCheck()
+      } else if (data?.type === 'command' && data.name === 'buttonCheckNext') {
+        pressNextRef.current?.()
+      } else if (data?.type === 'command' && MONITOR_COMMANDS.includes(data.name)) {
+        tracker[data.name](data.arg)
+      }
+    }
+
+    // ~10 preview frames a second as JPEG — plenty for positioning the patient
+    let encoding = false
+    const frameTimer = setInterval(() => {
+      setMonitorOpen(monitorAlive())
+      if (!monitorAlive() || encoding || latestStatus?.phase !== 'running') return
+      encoding = true
+      preview.toBlob((blob) => {
+        encoding = false
+        if (blob) channel.postMessage({ type: 'frame', blob })
+      }, 'image/jpeg', 0.75)
+    }, 100)
+
     return () => {
+      clearInterval(frameTimer)
       tracker.stop()
+      channel.postMessage({ type: 'ended' })
+      channel.close()
+      monitorChannelRef.current = null
       browserTrackerRef.current = null
       setBrowserStatus(null)
+      setMonitorOpen(false)
     }
   }, [eyeTracking, runId, runEye, completed])
 
@@ -921,29 +1104,54 @@ export default function TestScreen() {
 
   // ── Gaze calibration ──────────────────────────────────────────────────────
   // Resolves when the patient presses Space/Enter or clicks (same response
-  // button as the test). Capture phase so nothing else swallows the event.
-  function waitForPress() {
+  // button as the test), with { input: 'key' | 'mouse' }, or { skip: true }
+  // when the clinician clicks a Skip button. With allowNext, the clinician's
+  // N key, a Next button, or pressNextRef (camera monitor) resolve
+  // { next: true }. Capture phase so nothing else swallows the event; clicks
+  // on other clinician controls are ignored.
+  function waitForPress({ allowNext = false } = {}) {
     return new Promise(resolve => {
       function cleanup() {
         window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('mousedown', onMouse, true)
+        if (allowNext) pressNextRef.current = null
+      }
+      if (allowNext) {
+        pressNextRef.current = () => { cleanup(); resolve({ next: true }) }
       }
       // stopPropagation: the code after this press can start a trial straight
       // away, and the same event must not then reach handleResponse and score
       // that trial as "seen"
       function onKey(e) {
+        if (allowNext && e.code === 'KeyN') {
+          e.preventDefault()
+          cleanup()
+          resolve({ next: true })
+          return
+        }
         if (e.code !== 'Space' && e.code !== 'Enter') return
         e.preventDefault()
         e.stopPropagation()
         cleanup()
-        resolve()
+        resolve({ input: 'key' })
       }
       function onMouse(e) {
         if (e.button !== 0) return
         if (e.target?.closest?.('[data-calibration-cancel]')) return
+        if (e.target?.closest?.('[data-stage-skip]')) {
+          cleanup()
+          resolve({ skip: true })
+          return
+        }
+        if (allowNext && e.target?.closest?.('[data-stage-next]')) {
+          cleanup()
+          resolve({ next: true })
+          return
+        }
+        if (e.target?.closest?.('[data-ui-control]')) return
         e.stopPropagation()
         cleanup()
-        resolve()
+        resolve({ input: 'mouse' })
       }
       window.addEventListener('keydown', onKey, true)
       window.addEventListener('mousedown', onMouse, true)
@@ -1083,6 +1291,138 @@ export default function TestScreen() {
     }
   }
 
+  // Clinician picks a button on a stage prompt (Practice again / Continue)
+  function waitForChoice() {
+    return new Promise((resolve) => { stageChoiceRef.current = resolve })
+  }
+
+  // One practice round: same stimulus and timing as runStaticTrial, but the
+  // answer is only returned, never recorded. target null = catch round.
+  function runPracticeTrial(target) {
+    return new Promise((resolve) => {
+      const canvas = canvasRef.current
+      if (!canvas || unmountedRef.current) return resolve(null)
+      const { stimulus_size_deg: sizeDeg } = DEFAULT_PROTOCOL_SETTINGS
+      const color = stimulusCss(stimulusColorRef.current)
+      let shownAt = null
+      let early = 0
+      let done = false
+      let showTimer = null
+      let windowTimer = null
+
+      function finish(result) {
+        if (done) return
+        done = true
+        clearTimeout(showTimer)
+        clearTimeout(windowTimer)
+        window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('mousedown', onMouse, true)
+        if (canvasRef.current) {
+          gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
+        }
+        resolve({ target, early, ...result })
+      }
+      function onPress(e) {
+        e.stopPropagation()
+        // Before the stimulus appears, a press is a guess — count it, keep going
+        if (shownAt === null) { early += 1; return }
+        const rt = Math.round(performance.now() - shownAt)
+        finish(target ? { kind: 'hit', rt } : { kind: 'false_press' })
+      }
+      function onKey(e) {
+        if (e.code !== 'Space' && e.code !== 'Enter') return
+        e.preventDefault()
+        onPress(e)
+      }
+      function onMouse(e) {
+        if (e.button !== 0) return
+        if (e.target?.closest?.('[data-calibration-cancel], [data-ui-control]')) return
+        onPress(e)
+      }
+      window.addEventListener('keydown', onKey, true)
+      window.addEventListener('mousedown', onMouse, true)
+
+      showTimer = setTimeout(() => {
+        if (target && canvasRef.current) {
+          drawDot(canvasRef.current, gridMeta.current, target.xDeg, target.yDeg, color, sizeDeg)
+        }
+        shownAt = performance.now()
+        windowTimer = setTimeout(
+          () => finish({ kind: target ? 'miss' : 'catch_ok' }),
+          PRACTICE_RESPONSE_WINDOW_MS,
+        )
+      }, 600 + Math.random() * 900)
+    })
+  }
+
+  // Button check: open-ended, so the clinician can swap a clicker that isn't
+  // registering and watch the new one work. Every press shows up straight
+  // away; it ends when the clinician presses N or clicks Next (on the test
+  // screen or in the camera monitor). Returns 'next', 'skip' or 'cancel'.
+  async function runButtonCheck() {
+    const info = { running: true, presses: 0, input: null }
+    const update = () => {
+      buttonCheckRef.current = { ...info }
+      setStage({ kind: 'device', presses: info.presses, input: info.input })
+      postButtonCheck()
+    }
+    try {
+      for (;;) {
+        update()
+        const press = await waitForPress({ allowNext: true })
+        if (unmountedRef.current) return 'cancel'
+        if (press.skip) return 'skip'
+        if (press.next) {
+          if (info.presses > 0) return 'next'
+          continue // nothing has worked yet — stay on the check
+        }
+        info.presses += 1
+        info.input = press.input
+      }
+    } finally {
+      buttonCheckRef.current = { running: false, presses: 0, input: null }
+      postButtonCheck()
+    }
+  }
+
+  // Button check, then an 8-round practice the clinician can repeat.
+  // Returns early if the clinician skips.
+  async function runClickerCheck() {
+    const check = await runButtonCheck()
+    if (check !== 'next') { setStage(null); return }
+
+    for (;;) {
+      if (unmountedRef.current) return
+      setStage({ kind: 'practiceIntro' })
+      const start = await waitForPress()
+      if (start?.skip || unmountedRef.current) { setStage(null); return }
+      setStage(null)
+
+      const trials = buildPracticeTrials()
+      const results = []
+      for (let i = 0; i < trials.length; i++) {
+        setCalibMessage(`Practice — ${i + 1} of ${trials.length}. Press when you see a dot`)
+        const result = await runPracticeTrial(trials[i])
+        if (!result) return
+        results.push(result)
+      }
+      setCalibMessage('')
+
+      setStage({ kind: 'practiceResult', summary: summarizePractice(results) })
+      const choice = await waitForChoice()
+      if (choice !== 'again') { setStage(null); return }
+    }
+  }
+
+  async function runCountdown() {
+    for (let s = COUNTDOWN_SECONDS; s > 0; s--) {
+      if (unmountedRef.current) return
+      setStage({ kind: 'countdown', seconds: s })
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+    setStage(null)
+  }
+
   async function handleStart() {
     if (!runId) return
     if (calibratingRef.current) return
@@ -1095,31 +1435,49 @@ export default function TestScreen() {
     setProgress({ current: 1, total: TOTAL_POINTS })
     setOverlay(false)
 
-    // Calibrate first — pause/resume never comes back through here,
-    // so a run is only ever calibrated once. Skipped entirely when the
-    // clinician disabled eye tracking.
-    if (eyeTrackingRef.current) {
-      await setMediaPipeRunning(true)
-      if (BROWSER_TRACKING) {
-        // The in-page tracker may still be loading its model or learning the
-        // centre baseline — calibrating before then samples nothing
-        setCalibMessage('Starting eye tracking…')
-        await browserTrackerRef.current?.whenReady(10000)
-        setCalibMessage('')
-      } else {
-        // Give the tracker a moment to start and populate its state before calibration.
-        await new Promise(r => setTimeout(r, 700))
-      }
-      await runCalibration()
+    // Everything up to the first test point counts as "calibrating": it keeps a
+    // double-click from pausing and the fixation monitor from halting a run
+    // that hasn't started yet
+    calibratingRef.current = true
+    try {
+      // Button check + practice run — pause/resume never comes back through
+      // here, so this happens once per run
+      await runClickerCheck()
+      if (unmountedRef.current) return
 
-      // Calibration ends on a keypress, and the first stimulus used to follow
-      // it immediately — so the patient was still resettling from the last
-      // corner dot while point 1 was already being shown. Wait for a
-      // deliberate go-ahead so the clinician can get them fixating on the
-      // centre cross first.
-      calibratingRef.current = true   // keeps a double-click from pausing here
-      setCalibMessage('Calibration done — have the patient look at the centre cross, then press Space to begin')
-      await waitForPress()
+      // Calibrate — skipped entirely when the clinician disabled eye tracking
+      if (eyeTrackingRef.current) {
+        await setMediaPipeRunning(true)
+        if (BROWSER_TRACKING) {
+          // The in-page tracker may still be loading its model or learning the
+          // centre baseline — calibrating before then samples nothing
+          setCalibMessage('Starting eye tracking…')
+          await browserTrackerRef.current?.whenReady(10000)
+          setCalibMessage('')
+        } else {
+          // Give the tracker a moment to start and populate its state before calibration.
+          await new Promise(r => setTimeout(r, 700))
+        }
+        const calibrated = await runCalibration()
+        calibratingRef.current = true // runCalibration clears it when done
+        if (unmountedRef.current) return
+
+        // Calibration ends on a keypress, and the first stimulus used to
+        // follow it immediately — the patient was still resettling from the
+        // last corner dot. The success pop-up waits for a deliberate press
+        // once they're looking at the centre cross again. (A failed
+        // calibration has already shown its own message.)
+        if (calibrated) {
+          setStage({ kind: 'calibrated' })
+          await waitForPress()
+          setStage(null)
+        }
+      }
+
+      await runCountdown()
+      if (unmountedRef.current) return
+    } finally {
+      setStage(null)
       setCalibMessage('')
       calibratingRef.current = false
     }
@@ -1208,7 +1566,18 @@ export default function TestScreen() {
           is no way off the canvas short of finishing all 40 points, and the
           run it abandons is discarded rather than left in the patient's
           history — see handleCancelTest. */}
-      {calibMessage && !overlay && !started && (
+      {stage && !overlay && (
+        <StagePrompt
+          stage={stage}
+          onChoice={(value) => {
+            const resolve = stageChoiceRef.current
+            stageChoiceRef.current = null
+            resolve?.(value)
+          }}
+        />
+      )}
+
+      {(calibMessage || stage) && !overlay && !started && (
         <button
           type="button"
           data-calibration-cancel
@@ -1326,15 +1695,6 @@ export default function TestScreen() {
         </div>
       )}
 
-      {/* Camera panel — browser tracking only, start/pause overlay only */}
-      {overlay && BROWSER_TRACKING && eyeTracking && (
-        <BrowserTrackerPanel
-          status={browserStatus}
-          previewCanvasRef={previewCanvasRef}
-          trackerRef={browserTrackerRef}
-        />
-      )}
-
       {/* Overlay */}
       {overlay && (
         <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
@@ -1413,7 +1773,24 @@ export default function TestScreen() {
                     Off — the test will run without fixation monitoring or calibration
                   </p>
                 )}
-                {/* Browser mode reports camera status in the corner panel instead */}
+                {/* Browser mode: one status line here; the camera picture and
+                    its controls are in the monitor window, off the projector */}
+                {eyeTracking && BROWSER_TRACKING && (() => {
+                  const msg = trackerMessage(browserStatus)
+                  return (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <p className={`text-xs text-center max-w-md ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
+                      <button
+                        type="button"
+                        onClick={openCameraMonitor}
+                        className="px-3 py-1 rounded-lg bg-white/5 border border-white/10
+                          text-white/50 text-[11px] hover:bg-white/10 hover:text-white transition-all"
+                      >
+                        {monitorOpen ? 'Camera monitor open — show it' : 'Open camera monitor'}
+                      </button>
+                    </div>
+                  )
+                })()}
                 {eyeTracking && !BROWSER_TRACKING && !tracker.running && (
                   <p className="text-amber-400/80 text-xs">
                     Eye tracker not running
