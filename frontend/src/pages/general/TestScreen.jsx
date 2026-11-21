@@ -110,6 +110,10 @@ const FIXATION_TOLERANCES = [
 ]
 const DEFAULT_FIXATION_TOLERANCE = 5
 
+// How long a press is held before it is scored, so a glance the tracker
+// confirms just after the press can still throw it out — see handleResponse
+const PRESS_CONFIRM_MS = 350
+
 function readFixationTolerance() {
   const n = Number(readPref(FIXATION_TOLERANCE_KEY, DEFAULT_FIXATION_TOLERANCE))
   return FIXATION_TOLERANCES.some(t => t.value === n) ? n : DEFAULT_FIXATION_TOLERANCE
@@ -839,13 +843,13 @@ export default function TestScreen() {
     return pauseForFixationRef.current?.() ?? false
   }
 
-  // Fixation tolerance as the tracker's ellipse half-axes, in fractions of the
-  // canvas (the space the calibration dots are placed in)
-  function fixationLimit(toleranceDeg = fixationToleranceRef.current) {
+  // One degree of the grid as fractions of the canvas width / height (the
+  // space the calibration dots are placed in)
+  function screenGeometry() {
     const canvas = canvasRef.current
     const scale = gridMeta.current?.scale
     if (!canvas?.width || !canvas?.height || !scale) return null
-    return { x: (toleranceDeg * scale) / canvas.width, y: (toleranceDeg * scale) / canvas.height }
+    return { degX: scale / canvas.width, degY: scale / canvas.height }
   }
 
   function handleFixationToleranceChange(e) {
@@ -853,8 +857,7 @@ export default function TestScreen() {
     setFixationTolerance(next)
     fixationToleranceRef.current = next
     savePref(FIXATION_TOLERANCE_KEY, next)
-    const limit = fixationLimit(next)
-    if (limit) browserTrackerRef.current?.setFixationLimit(limit)
+    browserTrackerRef.current?.setTolerance(next)
   }
 
   // ── Static trial ──────────────────────────────────────────────────────────
@@ -974,6 +977,17 @@ export default function TestScreen() {
       responseWindowRef.current = null
     }
     if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
+
+    // The tracker smooths out camera shake, so it confirms a glance ~0.35s
+    // after the eyes move — a quick patient can press before that. Hold the
+    // result briefly and drop it if a glance turns up in the meantime (the
+    // fixation pause then repeats this point).
+    if (tracker?.hasCalibration() && eyeTrackingRef.current) {
+      const startedAt = trialStartRef.current
+      await new Promise(r => setTimeout(r, PRESS_CONFIRM_MS))
+      if (fixationPausedRef.current || !trialsRunningRef.current) return
+      if (startedAt && tracker.lookedAwaySince(startedAt) && pauseForFixationRef.current?.()) return
+    }
 
     if (point?.point_type === 'kinetic' && pos) {
       recordTrial(
@@ -1350,7 +1364,9 @@ export default function TestScreen() {
       }
 
       setCalibStep(null)
-      const limit = fixationLimit()
+      const geometry = screenGeometry()
+      const tol = fixationToleranceRef.current
+      const limit = geometry && { x: tol * geometry.degX, y: tol * geometry.degY }
       const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
         method: 'POST',
         // window: the fixation tolerance for the Python tracker's verdict,
@@ -1379,8 +1395,8 @@ export default function TestScreen() {
         return false
       }
       // The in-page tracker decides fixation itself from here on
-      if (browserTrackerRef.current && limit) {
-        browserTrackerRef.current.setCalibration(points, limit)
+      if (browserTrackerRef.current && geometry) {
+        browserTrackerRef.current.setCalibration(points, { ...geometry, toleranceDeg: tol })
       }
       return true
     } catch (err) {
