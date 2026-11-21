@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import API_BASE_URL from "../../config/api";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/Apicache";
 import { BROWSER_TRACKING } from "../../tracking/browserTracker";
 import { openCameraMonitor } from "../../tracking/cameraMonitor";
@@ -161,6 +161,8 @@ function OptionGrid({ options, value, onChange }) {
 export default function TestHome() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectedPatientId = searchParams.get("patient_id");
 
   const [patients, setPatients]     = useState([]);
   const [protocols, setProtocols]   = useState([]);
@@ -174,10 +176,16 @@ export default function TestHome() {
   // Patients: 5 min TTL — same cache key as Records.jsx so they share the entry
   useEffect(() => {
     cachedFetch(authFetch, `${API_BASE_URL}/api/patients/`, { ttl: 5 * 60_000 })
-      .then(data => setPatients(Array.isArray(data) ? data : []))
+      .then(data => {
+        const patientList = Array.isArray(data) ? data : [];
+        setPatients(patientList);
+        if (preselectedPatientId && patientList.some(p => p.id === preselectedPatientId)) {
+          setPatientId(preselectedPatientId);
+        }
+      })
       .catch(() => setPatients([]))
       .finally(() => setLoadingPx(false));
-  }, [authFetch]);
+  }, [authFetch, preselectedPatientId]);
 
   // Protocols: 30 min TTL — essentially static, almost never changes
   useEffect(() => {

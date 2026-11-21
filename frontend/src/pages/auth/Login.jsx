@@ -4,6 +4,7 @@ import GoogleIcon from "@mui/icons-material/Google";
 import splash_art_perivue from "../../assets/splash_art_perivue.png";
 import API_BASE_URL from "../../config/api";
 import { useAuth } from "../../context/AuthContext";
+import { INPUT_LIMITS } from "../../utils/validation";
 
 function Login() {
   const [testEmail, setTestEmail] = useState("");
@@ -104,6 +105,9 @@ function Login() {
               value={testEmail}
               onChange={e => setTestEmail(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleTestLogin()}
+              required
+              maxLength={INPUT_LIMITS.email}
+              autoComplete="email"
               className="p-2 rounded-lg text-black text-sm w-full text-center"
             />
             {error && <p className="text-red-400 text-xs">{error}</p>}

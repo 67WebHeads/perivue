@@ -9,6 +9,7 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import TrackChangesIcon from "@mui/icons-material/TrackChanges";
 import ManageAccountsIcon from "@mui/icons-material/ManageAccounts";
 import SettingsIcon from "@mui/icons-material/Settings";
+import { useToast } from "../context/ToastContext";
 
 function getInitials(name = "", email = "") {
   const source = name.trim() || email.trim();
@@ -57,6 +58,7 @@ function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const toast = useToast();
 
   const navItems = [
     { path: "/dashboard", label: "Dashboard", icon: <SpaceDashboardIcon /> },
@@ -89,6 +91,7 @@ function Layout() {
 
     await logout();
     navigate("/login", { replace: true });
+    toast.info("You have been signed out", { title: "Signed out" });
   }
 
   return (
