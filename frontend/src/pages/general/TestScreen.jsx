@@ -4,6 +4,14 @@ import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 import { BROWSER_TRACKING, startBrowserTracker } from '../../tracking/browserTracker'
 import {
+  MONITOR_CHANNEL,
+  MONITOR_COMMANDS,
+  MONITOR_TIMEOUT_MS,
+  TONE_CLASS,
+  openCameraMonitor,
+  trackerMessage,
+} from '../../tracking/cameraMonitor'
+import {
   STIMULUS_COLORS, STIMULUS_COLOR_KEY, DEFAULT_STIMULUS_COLOR, TANGENT_OPACITY_KEY,
   stimulusCss, readPref, savePref, readViewingDistance, projectionFor,
 } from '../../config/projection'
@@ -162,106 +170,6 @@ function drawCalibrationTarget(canvas, sx, sy, pulse) {
   ctx.fill()
 }
 
-// ── Browser tracker panel ─────────────────────────────────────────────────────
-// Stands in for the Python runner's OpenCV preview window: camera view with the
-// tracked eye ringed, the untested eye greyed, the fixation box and gaze dot,
-// plus the runner's [F] flip / [R] re-learn keys as buttons. Shown only on the
-// start/pause overlay, never during trials.
-function trackerMessage(status) {
-  if (!status || status.phase === 'starting') {
-    return { tone: 'muted', text: 'Starting camera — allow camera access if the browser asks' }
-  }
-  if (status.phase === 'loading') return { tone: 'muted', text: 'Loading eye-tracking model…' }
-  if (status.phase === 'error') return { tone: 'bad', text: status.error }
-  if (status.feedIsBlack) {
-    return { tone: 'bad', text: "Camera picture is black — check the camera isn't covered or in use by another app" }
-  }
-  if (!status.facePresent) {
-    return { tone: 'warn', text: 'Camera OK — no face detected. Seat the patient facing the camera' }
-  }
-  if (status.occluded) {
-    return { tone: 'bad', text: 'Tested eye looks covered — the occluder goes over the OTHER eye' }
-  }
-  if (status.learning) {
-    return {
-      tone: 'warn',
-      text: `Learning centre gaze — cover the untested eye and have the patient look at the centre (${status.learning.count}/${status.learning.total})`,
-    }
-  }
-  if (!status.faceDetected) return { tone: 'warn', text: 'Camera OK — eye not readable (blink or glare?)' }
-  return {
-    tone: 'good',
-    text: `Camera OK — face detected · fixation ${status.fixating ? 'OK' : 'LOST'}${status.calibrated ? ' (calibrated)' : ''}`,
-  }
-}
-
-const TONE_CLASS = {
-  muted: 'text-white/45',
-  warn: 'text-amber-400/90',
-  bad: 'text-red-400',
-  good: 'text-emerald-400/90',
-}
-
-function BrowserTrackerPanel({ status, previewCanvasRef, trackerRef }) {
-  const [hidden, setHidden] = useState(
-    () => { try { return localStorage.getItem('perivue_tracker_preview') === 'off' } catch { return false } }
-  )
-  const msg = trackerMessage(status)
-  const running = status?.phase === 'running'
-
-  function toggleHidden() {
-    const next = !hidden
-    setHidden(next)
-    try { localStorage.setItem('perivue_tracker_preview', next ? 'off' : 'on') } catch { /* not persisted */ }
-  }
-
-  const btn = 'px-2.5 py-1 rounded-lg bg-white/8 border border-white/12 text-white/60 text-[11px] hover:bg-white/15 hover:text-white transition-all disabled:opacity-40'
-
-  return (
-    <div className="absolute left-5 bottom-5 z-20 w-72 pointer-events-auto
-      rounded-xl bg-black/70 border border-white/10 p-2.5 flex flex-col gap-2"
-      onDoubleClick={(e) => e.stopPropagation()}
-    >
-      {!hidden && (
-        <canvas ref={previewCanvasRef} className="w-full aspect-video rounded-md bg-white/5" />
-      )}
-      <p className={`text-[11px] leading-snug ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
-      {running && status.offset && (
-        <p className="text-white/30 text-[10px] font-mono">
-          offset from centre: h={status.offset.h >= 0 ? '+' : ''}{status.offset.h.toFixed(3)}{' '}
-          v={status.offset.v >= 0 ? '+' : ''}{status.offset.v.toFixed(3)}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" className={btn} disabled={!running}
-          onClick={() => trackerRef.current?.toggleFlip()}
-          title="Use if the ringed eye is not the one being tested">
-          Flip left/right {status?.flip ? '(on)' : '(off)'}
-        </button>
-        <button type="button" className={btn} disabled={!running}
-          onClick={() => trackerRef.current?.relearn()}
-          title="Re-learn the patient's centre gaze after they shift or the occluder goes on">
-          Re-learn centre
-        </button>
-        <button type="button" className={btn} onClick={toggleHidden}>
-          {hidden ? 'Show camera' : 'Hide camera'}
-        </button>
-      </div>
-      {status?.cameras?.length > 1 && (
-        <select
-          value={status.cameraId || ''}
-          onChange={(e) => trackerRef.current?.setCamera(e.target.value)}
-          className="w-full rounded-lg bg-white/8 border border-white/12 text-white/70 text-[11px] px-2 py-1"
-        >
-          {status.cameras.map((c) => (
-            <option key={c.id} value={c.id} className="bg-neutral-900">{c.label}</option>
-          ))}
-        </select>
-      )}
-    </div>
-  )
-}
-
 // ─── Pre-test instructions ────────────────────────────────────────────────────
 // Projected to the patient, so the text is large and plain. Opens from the
 // Begin test button; Start test then runs handleStart (calibration → trials).
@@ -392,8 +300,10 @@ export default function TestScreen() {
   // Replaces the Python runner on the hosted site: this page opens the webcam
   // and posts fixation data itself. See tracking/browserTracker.js.
   const browserTrackerRef = useRef(null)
-  const previewCanvasRef  = useRef(null)
   const [browserStatus, setBrowserStatus] = useState(null)
+  // The camera preview is shown in a separate monitor window (/test/camera)
+  // so it never appears on the projector — see tracking/cameraMonitor.js
+  const [monitorOpen, setMonitorOpen] = useState(false)
 
   // ── Calibration refs ──────────────────────────────────────────────────────
   const calibratingRef = useRef(false)
@@ -508,18 +418,61 @@ export default function TestScreen() {
   useEffect(() => {
     if (!BROWSER_TRACKING || !eyeTracking || !runId || !runEye || completed) return
 
+    // Off-page canvas the tracker draws its preview into; frames are copied
+    // from it to the camera monitor window while one is open
+    const preview = document.createElement('canvas')
+    preview.width = 640
+    preview.height = 360
+    const channel = new BroadcastChannel(MONITOR_CHANNEL)
+    let monitorSeenAt = 0
+    let latestStatus = null
+    const monitorAlive = () => Date.now() - monitorSeenAt < MONITOR_TIMEOUT_MS
+    const sendStatus = () =>
+      channel.postMessage({ type: 'status', runId, eye: runEye, status: latestStatus })
+
     const tracker = startBrowserTracker({
       runId,
       eye: runEye,
       apiBase: API_BASE_URL,
-      onStatus: setBrowserStatus,
-      getPreviewCanvas: () => previewCanvasRef.current,
+      onStatus: (status) => {
+        latestStatus = status
+        setBrowserStatus(status)
+        sendStatus()
+      },
+      // Skip drawing the preview entirely when nobody is watching
+      getPreviewCanvas: () => (monitorAlive() ? preview : null),
     })
     browserTrackerRef.current = tracker
+
+    channel.onmessage = ({ data }) => {
+      if (data?.type === 'hello') {
+        monitorSeenAt = Date.now()
+        sendStatus()
+      } else if (data?.type === 'command' && MONITOR_COMMANDS.includes(data.name)) {
+        tracker[data.name](data.arg)
+      }
+    }
+
+    // ~10 preview frames a second as JPEG — plenty for positioning the patient
+    let encoding = false
+    const frameTimer = setInterval(() => {
+      setMonitorOpen(monitorAlive())
+      if (!monitorAlive() || encoding || latestStatus?.phase !== 'running') return
+      encoding = true
+      preview.toBlob((blob) => {
+        encoding = false
+        if (blob) channel.postMessage({ type: 'frame', blob })
+      }, 'image/jpeg', 0.75)
+    }, 100)
+
     return () => {
+      clearInterval(frameTimer)
       tracker.stop()
+      channel.postMessage({ type: 'ended' })
+      channel.close()
       browserTrackerRef.current = null
       setBrowserStatus(null)
+      setMonitorOpen(false)
     }
   }, [eyeTracking, runId, runEye, completed])
 
@@ -1326,15 +1279,6 @@ export default function TestScreen() {
         </div>
       )}
 
-      {/* Camera panel — browser tracking only, start/pause overlay only */}
-      {overlay && BROWSER_TRACKING && eyeTracking && (
-        <BrowserTrackerPanel
-          status={browserStatus}
-          previewCanvasRef={previewCanvasRef}
-          trackerRef={browserTrackerRef}
-        />
-      )}
-
       {/* Overlay */}
       {overlay && (
         <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
@@ -1413,7 +1357,24 @@ export default function TestScreen() {
                     Off — the test will run without fixation monitoring or calibration
                   </p>
                 )}
-                {/* Browser mode reports camera status in the corner panel instead */}
+                {/* Browser mode: one status line here; the camera picture and
+                    its controls are in the monitor window, off the projector */}
+                {eyeTracking && BROWSER_TRACKING && (() => {
+                  const msg = trackerMessage(browserStatus)
+                  return (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <p className={`text-xs text-center max-w-md ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
+                      <button
+                        type="button"
+                        onClick={openCameraMonitor}
+                        className="px-3 py-1 rounded-lg bg-white/5 border border-white/10
+                          text-white/50 text-[11px] hover:bg-white/10 hover:text-white transition-all"
+                      >
+                        {monitorOpen ? 'Camera monitor open — show it' : 'Open camera monitor'}
+                      </button>
+                    </div>
+                  )
+                })()}
                 {eyeTracking && !BROWSER_TRACKING && !tracker.running && (
                   <p className="text-amber-400/80 text-xs">
                     Eye tracker not running

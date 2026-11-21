@@ -13,6 +13,7 @@ import Records from "./pages/general/Records.jsx";
 import Layout from "./components/Layout.jsx";
 import TestHome from "./pages/general/TestHome.jsx";
 import TestScreen from './pages/general/TestScreen.jsx';
+import CameraMonitor from './pages/general/CameraMonitor.jsx';
 import TestResults from './pages/general/TestResults.jsx';
 import UserManagement from "./pages/general/UserManagement";
 import Settings from "./pages/general/Settings.jsx";
@@ -60,6 +61,7 @@ createRoot(document.getElementById("root")).render(
 
           {/* Fullscreen routes — no layout */}
           <Route path="/test/canvas"  element={<TestScreen />} />
+          <Route path="/test/camera"  element={<CameraMonitor />} />
           <Route path="/test/results" element={<TestResults />} />
         </Routes>
       </AuthProvider>
