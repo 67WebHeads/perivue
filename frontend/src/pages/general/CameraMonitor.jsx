@@ -148,6 +148,23 @@ export default function CameraMonitor() {
         <>
           <p className={`text-sm leading-snug ${TONE_CLASS[msg.tone]}`}>{msg.text}</p>
 
+          {status?.tolerance && (
+            <p className="text-xs text-white/50">
+              {status.tolerance.measuring
+                ? 'Checking how steady the camera reading is — patient keeps looking at the centre…'
+                : status.tolerance.effective > status.tolerance.chosen
+                  ? `Fixation tolerance widened to ${status.tolerance.effective}° (set to ${status.tolerance.chosen}°) — the camera reading is shaky. Brighter light on the face or a camera closer to the eye helps.`
+                  : `Fixation tolerance ${status.tolerance.chosen}°`}
+            </p>
+          )}
+          {status?.tolerance?.coarse && !status.tolerance.measuring && (
+            <p className="text-xs text-amber-400/90">
+              Too shaky to catch glances at the 10° dots. Check the projection matches the
+              viewing distance in Settings, move the camera closer to the patient&apos;s eye,
+              then calibrate again.
+            </p>
+          )}
+
           {eyeText && (
             <p className="text-xs text-white/50">
               Testing the {eyeText.tested} eye — the patient&apos;s{' '}
