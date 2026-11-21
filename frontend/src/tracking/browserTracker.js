@@ -62,8 +62,32 @@ const FIX_HALF_V = 0.20
 // fixation window, so small drift doesn't look like a wild glance
 const GAZE_HALF_H = 0.25
 const GAZE_HALF_V = GAZE_HALF_H * (FIX_HALF_V / FIX_HALF_H)
-// Mirrors FIXATION_WINDOW in visual_tests/views.py — display only
-const SERVER_FIXATION_WINDOW = 0.12
+
+// ── Calibrated glance detection ──────────────────────────────────────────────
+// Once the page hands over its 5-point calibration (setCalibration), this
+// tracker decides fixation itself and tells the page at once — no round trip
+// through the backend, which on the hosted site added ~1.5s and let quick
+// glances at a dot go unnoticed.
+//
+// The decision runs on a short running median of the per-frame ratios rather
+// than the heavy EMA: the median throws away single-frame landmark spikes yet
+// follows a real eye movement within ~2 frames, where the EMA took ~0.5s.
+const FAST_FRAMES = 5
+// The median has to sit outside the tolerance this long to count as a glance.
+// A look at a dot lasts well over 0.2s; landmark noise doesn't stay out for 4+
+// frames in a row.
+const GLANCE_SECS = 0.15
+// ...and back inside this long before fixation counts as regained
+const REGAIN_SECS = 0.3
+// At a response, this much time outside already counts — the patient can press
+// before GLANCE_SECS is up, and that press must not be scored
+const GLANCE_AT_PRESS_SECS = 0.06
+// Same floor as MIN_CALIBRATION_SPAN in visual_tests/views.py
+const MIN_CALIBRATION_SPAN = 0.01
+// The calibrated centre follows slow head drift while the patient is on the
+// centre (~10s time constant at 30fps), so a test doesn't pause more and more
+// as it goes on. Never moves while they are outside the tolerance.
+const CENTER_ADAPT = 0.003
 
 const BLACK_FRAME_MEAN = 5.0
 const BAD_THRESHOLD_SECS = 0.5
@@ -192,6 +216,32 @@ function estimateGaze(avgH, avgV) {
   return [Math.max(0, Math.min(1, sx)), Math.max(0, Math.min(1, sy))]
 }
 
+function buildMapping(points) {
+  // Ratios -> screen fractions from the page's 5-point calibration. Gains come
+  // from the corner pairs' real screen distance, so the result is in the same
+  // screen fractions the fixation limit is given in.
+  const center = points.find((p) => Math.abs(p.sx - 0.5) < 0.05 && Math.abs(p.sy - 0.5) < 0.05)
+  if (!center) return null
+  const corners = points.filter((p) => p !== center)
+  const mean = (list, key) => list.reduce((sum, p) => sum + p[key], 0) / list.length
+  const left = corners.filter((p) => p.sx < 0.5)
+  const right = corners.filter((p) => p.sx > 0.5)
+  const top = corners.filter((p) => p.sy < 0.5)
+  const bottom = corners.filter((p) => p.sy > 0.5)
+  if (!left.length || !right.length || !top.length || !bottom.length) return null
+  const hSpan = mean(right, 'h') - mean(left, 'h')
+  const vSpan = mean(bottom, 'v') - mean(top, 'v')
+  if (Math.abs(hSpan) < MIN_CALIBRATION_SPAN || Math.abs(vSpan) < MIN_CALIBRATION_SPAN) return null
+  return {
+    sx: center.sx,
+    sy: center.sy,
+    h: center.h,
+    v: center.v,
+    gainX: (mean(right, 'sx') - mean(left, 'sx')) / hSpan,
+    gainY: (mean(bottom, 'sy') - mean(top, 'sy')) / vSpan,
+  }
+}
+
 function median(values) {
   // Same pick as the runner: sorted[len // 2]
   const sorted = [...values].sort((a, b) => a - b)
@@ -224,9 +274,10 @@ function cameraErrorMessage(err) {
  *   stop(), toggleFlip(), relearn(), setCamera(deviceId), whenReady(timeoutMs),
  *   latestReading()
  * onStatus(status) is called whenever the displayed state changes.
+ * onFixationChange(isFixating) is called the moment the verdict flips.
  * getPreviewCanvas() may return a <canvas> to draw the camera preview into.
  */
-export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewCanvas }) {
+export function startBrowserTracker({ runId, eye, apiBase, onStatus, onFixationChange, getPreviewCanvas }) {
   const fixationUrl = `${apiBase}/api/visual-tests/runs/${runId}/fixation/`
   let stopped = false
   let video = null
@@ -270,6 +321,19 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
   let facePresent = false
   let server = { isFixating: null, gazeX: null, gazeY: null, calibrated: false }
 
+  // Calibrated glance detection — see GLANCE_SECS
+  let mapping = null // from setCalibration()
+  let limit = null // { x, y } half-axes of the fixation ellipse, screen fractions
+  let fastBuf = []
+  let fastGaze = null // [x, y] screen fractions from the running median
+  let outsideSince = null
+  let insideSince = null
+  let lastLostAt = null
+  // While the page shows the calibration dots the centre must not creep: the
+  // corner dots sit inside the loose uncalibrated window, so it used to drift
+  // toward each dot being stared at and bend the calibration out of shape
+  let calibrating = false
+
   let phase = 'starting' // starting | loading | running | error
   let error = ''
   let lastStatusKey = ''
@@ -280,7 +344,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
   }
 
   function emitStatus() {
-    const displayFixating = server.isFixating !== null ? server.isFixating : currentlyFixating
+    const displayFixating = mapping || server.isFixating === null ? currentlyFixating : server.isFixating
     const status = {
       phase,
       error,
@@ -293,7 +357,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
       blinking,
       feedIsBlack,
       fixating: displayFixating,
-      calibrated: server.calibrated,
+      calibrated: Boolean(mapping) || server.calibrated,
       flip: flipEnabled,
       cameras,
       cameraId,
@@ -320,6 +384,40 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
     occlusionFrames = 0
     emaH = null
     emaV = null
+    resetFast()
+    // The new baseline is taken while they look at the centre, which puts the
+    // centre at 0.5 again — keep the calibrated gains, re-anchor the origin
+    if (mapping) mapping = { ...mapping, h: 0.5, v: 0.5 }
+  }
+
+  function resetFast() {
+    fastBuf = []
+    fastGaze = null
+    outsideSince = null
+    insideSince = null
+  }
+
+  function setFixating(value, t) {
+    if (value === currentlyFixating) return
+    currentlyFixating = value
+    if (!value) lastLostAt = t
+    // Tell the server now rather than at the next tick
+    lastPostTime = 0
+    try {
+      onFixationChange?.(value)
+    } catch (err) {
+      console.error('onFixationChange failed:', err)
+    }
+  }
+
+  function toScreen(h, v) {
+    return [mapping.sx + (h - mapping.h) * mapping.gainX, mapping.sy + (v - mapping.v) * mapping.gainY]
+  }
+
+  function outsideLimit([x, y]) {
+    const dx = (x - mapping.sx) / limit.x
+    const dy = (y - mapping.sy) / limit.y
+    return dx * dx + dy * dy > 1
   }
 
   async function openCamera() {
@@ -487,7 +585,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
         // Ratios are meaningless — hold the last gaze, report no reading so
         // calibration never samples a guess
         faceDetected = emaH !== null && !occluded
-        if (t - lastGoodTime >= BAD_THRESHOLD_SECS) currentlyFixating = false
+        if (t - lastGoodTime >= BAD_THRESHOLD_SECS) setFixating(false, t)
       } else {
         const [rawH, rawV] = getRatios(lm, specs, w, h)
 
@@ -511,7 +609,7 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
           // Creep the center toward where they're looking — only inside the
           // window, and frozen once calibrated (the saved mapping is expressed
           // in these baseline-relative ratios)
-          if (fixating && !server.calibrated) {
+          if (fixating && !mapping && !calibrating && !server.calibrated) {
             baselineH += BASELINE_ADAPT * (avgH - 0.5)
             baselineV += BASELINE_ADAPT * (avgV - 0.5)
           }
@@ -521,27 +619,54 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
           ;[gazeX, gazeY] = estimateGaze(emaH, emaV)
           faceDetected = true
 
-          if (fixating) {
+          fastBuf.push([avgH, avgV])
+          if (fastBuf.length > FAST_FRAMES) fastBuf.shift()
+
+          if (mapping && limit && fastBuf.length >= 3) {
+            const fastH = median(fastBuf.map((s) => s[0]))
+            const fastV = median(fastBuf.map((s) => s[1]))
+            fastGaze = toScreen(fastH, fastV)
+            if (outsideLimit(fastGaze)) {
+              insideSince = null
+              if (outsideSince === null) outsideSince = t
+              if (t - outsideSince >= GLANCE_SECS) setFixating(false, t)
+            } else {
+              outsideSince = null
+              lastGoodTime = t
+              if (insideSince === null) insideSince = t
+              if (t - insideSince >= REGAIN_SECS) setFixating(true, t)
+              // Follow slow head drift — see CENTER_ADAPT
+              mapping.h += CENTER_ADAPT * (fastH - mapping.h)
+              mapping.v += CENTER_ADAPT * (fastV - mapping.v)
+            }
+          } else if (mapping && limit) {
+            // Median not primed yet (just after a blink or relearn)
             lastGoodTime = t
-            currentlyFixating = true
+          } else if (fixating) {
+            lastGoodTime = t
+            setFixating(true, t)
           } else if (t - lastGoodTime >= BAD_THRESHOLD_SECS) {
-            currentlyFixating = false
+            setFixating(false, t)
           }
         }
       }
     } else {
       faceDetected = false
-      if (t - lastGoodTime >= BAD_THRESHOLD_SECS) currentlyFixating = false
+      if (t - lastGoodTime >= BAD_THRESHOLD_SECS) setFixating(false, t)
       gazeX = 0.5
       gazeY = 0.5
+      resetFast()
     }
 
     if (t - lastPostTime >= POST_INTERVAL && !postPending) {
       lastPostTime = t
+      const shownGaze = mapping && fastGaze ? fastGaze.map((c) => Math.max(0, Math.min(1, c))) : [gazeX, gazeY]
       postFixation({
         is_fixating: currentlyFixating,
-        gaze_x: round4(gazeX),
-        gaze_y: round4(gazeY),
+        gaze_x: round4(shownGaze[0]),
+        gaze_y: round4(shownGaze[1]),
+        // This page made the calibrated decision — the server keeps it
+        client_calibrated: Boolean(mapping && limit),
         // EMA-smoothed ratios — the canvas samples these during calibration
         raw_h: faceDetected && emaH !== null ? round4(emaH) : null,
         raw_v: faceDetected && emaV !== null ? round4(emaV) : null,
@@ -600,19 +725,27 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
       }
     }
 
-    // Fixation tolerance, in the same normalized space as the gaze marker
-    const [boxH, boxV] = server.calibrated
-      ? [SERVER_FIXATION_WINDOW, SERVER_FIXATION_WINDOW]
-      : [FIX_HALF_H / (2 * GAZE_HALF_H), FIX_HALF_V / (2 * GAZE_HALF_V)]
+    // Fixation tolerance, in the same normalized (screen) space as the gaze
+    // marker: the calibrated ellipse when there is one
     ctx.lineWidth = 1 * dpr
     ctx.strokeStyle = 'rgba(160,160,160,0.7)'
-    ctx.strokeRect((0.5 - boxH) * cw, (0.5 - boxV) * ch, 2 * boxH * cw, 2 * boxV * ch)
-
-    const useServer = server.calibrated && server.gazeX !== null && server.gazeY !== null
-    const gx = (useServer ? server.gazeX : gazeX) * cw
-    const gy = (useServer ? server.gazeY : gazeY) * ch
-    ctx.strokeStyle = '#facc15'
-    ctx.fillStyle = '#facc15'
+    let marker
+    if (mapping && limit) {
+      ctx.beginPath()
+      ctx.ellipse(mapping.sx * cw, mapping.sy * ch, limit.x * cw, limit.y * ch, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      marker = fastGaze ? fastGaze.map((c) => Math.max(0, Math.min(1, c))) : [gazeX, gazeY]
+    } else {
+      const [boxH, boxV] = [FIX_HALF_H / (2 * GAZE_HALF_H), FIX_HALF_V / (2 * GAZE_HALF_V)]
+      ctx.strokeRect((0.5 - boxH) * cw, (0.5 - boxV) * ch, 2 * boxH * cw, 2 * boxV * ch)
+      const useServer = server.calibrated && server.gazeX !== null && server.gazeY !== null
+      marker = useServer ? [server.gazeX, server.gazeY] : [gazeX, gazeY]
+    }
+    const gx = marker[0] * cw
+    const gy = marker[1] * ch
+    const color = currentlyFixating ? '#facc15' : '#f87171'
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
     ctx.lineWidth = 2 * dpr
     ctx.beginPath()
     ctx.arc(gx, gy, 7 * dpr, 0, Math.PI * 2)
@@ -736,6 +869,38 @@ export function startBrowserTracker({ runId, eye, apiBase, onStatus, getPreviewC
     latestReading() {
       if (!faceDetected || emaH === null || emaV === null) return null
       return { h: round4(emaH), v: round4(emaV) }
+    },
+    // The page's 5-point calibration ({sx, sy, h, v} in latestReading()'s
+    // units) and the fixation tolerance as ellipse half-axes in screen
+    // fractions. Returns false if the calibration is too flat to use, in which
+    // case the uncalibrated verdict carries on.
+    // Freezes the centre while the calibration dots are up — see `calibrating`
+    setCalibrating(value) {
+      calibrating = Boolean(value)
+    },
+    setCalibration(points, fixationLimit) {
+      calibrating = false
+      mapping = Array.isArray(points) ? buildMapping(points) : null
+      if (fixationLimit) limit = fixationLimit
+      resetFast()
+      emitStatus()
+      return Boolean(mapping)
+    },
+    setFixationLimit(fixationLimit) {
+      limit = fixationLimit
+      resetFast()
+    },
+    isFixating() {
+      return currentlyFixating
+    },
+    // True if the patient looked away at any point since `sinceMs`
+    // (performance.now() time) — or is looking away right now. Used to throw
+    // out a response given while looking at the dot instead of the centre.
+    lookedAwaySince(sinceMs) {
+      if (!mapping || !limit) return false
+      const since = sinceMs / 1000
+      if (lastLostAt !== null && lastLostAt >= since) return true
+      return outsideSince !== null && now() - Math.max(outsideSince, since) >= GLANCE_AT_PRESS_SECS
     },
     // Resolves once the center baseline is learned (or on error / timeout),
     // so calibration doesn't start before the tracker has any readings

@@ -52,13 +52,19 @@ _tracker_job = None
 _tracker_status = {}
 TRACKER_STALE_SECS = 3.0
 # The calibrated verdict only flips to LOST after the gaze has been outside
-# the fixation window this long — mirrors the runner's own 0.5s debounce so
-# landmark jitter doesn't flicker the verdict while the patient holds still
-FIXATION_GRACE_SECS = 0.5
-# Half-width of the calibrated fixation window (screen fractions from center).
-# The calibration corner dots sit 0.25 off-center, so 0.12 means glancing even
-# halfway toward a corner counts as looking away; raise if it false-triggers.
-FIXATION_WINDOW = 0.12
+# the fixation window this long. The runner posts every 0.2s, so this means
+# two outside readings in a row: one stray reading is jitter, a look at a dot
+# lasts longer. (Was 0.5s, which together with the EMA let quick glances at a
+# dot go unnoticed.)
+FIXATION_GRACE_SECS = 0.15
+# Fallback half-width of the calibrated fixation window, in screen fractions
+# from the centre, for calibrations saved without a "window". The canvas sends
+# its fixation tolerance (degrees, converted to screen fractions per axis)
+# with every calibration, so this is rarely used.
+FIXATION_WINDOW = 0.06
+# Accepted range for a canvas-supplied window half-axis
+MIN_FIXATION_WINDOW = 0.005
+MAX_FIXATION_WINDOW = 0.3
 
 
 class MediaPipeStartView(APIView):
@@ -524,7 +530,7 @@ class TrialResultListView(APIView):
 
 
 # Smallest usable spread between the left and right (top and bottom)
-# calibration dots. Those dots sit 0.5 of the screen apart, and on this setup a
+# calibration dots. Those dots sit most of the screen apart, and on this setup a
 # corner-to-corner gaze only moves the iris ratio about 0.04 — so a valid
 # calibration lands near 0.04 and the old 0.02 floor left barely 2x of margin,
 # close enough that a slightly noisy but perfectly good calibration got thrown
@@ -536,9 +542,14 @@ MIN_CALIBRATION_SPAN = 0.01
 
 def _calibration_spans(calibration):
     """
-    (h_span, v_span, center_h, center_v) for a 5-point calibration, or None if
-    it is malformed. Spans are the raw-ratio distance between dot pairs that
-    sit half a screen apart; they are what sets the gain.
+    (h_span, v_span, center_h, center_v, x_span, y_span, center_x, center_y)
+    for a 5-point calibration, or None if it is malformed. h/v spans are the
+    raw-ratio distance between the left/right (top/bottom) dot pairs and x/y
+    spans the screen distance between those same pairs; together they set the
+    gain. The screen distance used to be assumed to be 0.5, which stopped being
+    true when the dots moved out to 0.1/0.9 — every gaze then read at 62% of
+    its real distance from the centre and glances at the inner dots were
+    never caught.
     """
     try:
         points = calibration.get("points") or []
@@ -565,39 +576,71 @@ def _calibration_spans(calibration):
         if not (left and right and top and bottom):
             return None
 
-        h_left = sum(p["h"] for p in left) / len(left)
-        h_right = sum(p["h"] for p in right) / len(right)
-        v_top = sum(p["v"] for p in top) / len(top)
-        v_bottom = sum(p["v"] for p in bottom) / len(bottom)
-        return (h_right - h_left, v_bottom - v_top, center["h"], center["v"])
+        def mean(group, key):
+            return sum(p[key] for p in group) / len(group)
+
+        return (
+            mean(right, "h") - mean(left, "h"),
+            mean(bottom, "v") - mean(top, "v"),
+            center["h"],
+            center["v"],
+            mean(right, "sx") - mean(left, "sx"),
+            mean(bottom, "sy") - mean(top, "sy"),
+            center["sx"],
+            center["sy"],
+        )
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _apply_calibration(calibration, raw_h, raw_v):
+def _fixation_window(calibration):
+    """(half_x, half_y) of the fixation ellipse in screen fractions."""
+    window = calibration.get("window") if isinstance(calibration, dict) else None
+    try:
+        return (
+            min(MAX_FIXATION_WINDOW, max(MIN_FIXATION_WINDOW, float(window["x"]))),
+            min(MAX_FIXATION_WINDOW, max(MIN_FIXATION_WINDOW, float(window["y"]))),
+        )
+    except (KeyError, TypeError, ValueError):
+        return FIXATION_WINDOW, FIXATION_WINDOW
+
+
+def _apply_calibration(calibration, raw_h, raw_v, fast_h=None, fast_v=None):
     """
     Map raw iris ratios to screen fractions using the run's 5-point
     calibration. Returns (gaze_x, gaze_y, is_fixating) or None if the
     calibration is malformed or degenerate (fall back to the runner's verdict).
+
+    raw_h/raw_v (EMA-smoothed) place the gaze marker; fast_h/fast_v (a short
+    running median the runner also sends) decide fixation when present, since
+    the EMA lags a quick glance by ~0.5s.
     """
     try:
         spans = _calibration_spans(calibration)
         if spans is None:
             return None
-        h_span, v_span, ch, cv = spans
+        h_span, v_span, ch, cv, x_span, y_span, cx, cy = spans
 
         if abs(h_span) < MIN_CALIBRATION_SPAN or abs(v_span) < MIN_CALIBRATION_SPAN:
             return None
 
-        gaze_x = 0.5 + (raw_h - ch) * 0.5 / h_span
-        gaze_y = 0.5 + (raw_v - cv) * 0.5 / v_span
+        def to_screen(h, v):
+            return (
+                cx + (float(h) - ch) * x_span / h_span,
+                cy + (float(v) - cv) * y_span / v_span,
+            )
+
+        gaze_x, gaze_y = to_screen(raw_h, raw_v)
+        if fast_h is not None and fast_v is not None:
+            test_x, test_y = to_screen(fast_h, fast_v)
+        else:
+            test_x, test_y = gaze_x, gaze_y
+
+        half_x, half_y = _fixation_window(calibration)
+        fixating = ((test_x - cx) / half_x) ** 2 + ((test_y - cy) / half_y) ** 2 <= 1
+
         gaze_x = max(0.0, min(1.0, gaze_x))
         gaze_y = max(0.0, min(1.0, gaze_y))
-
-        fixating = (
-            abs(gaze_x - 0.5) <= FIXATION_WINDOW
-            and abs(gaze_y - 0.5) <= FIXATION_WINDOW
-        )
         return gaze_x, gaze_y, fixating
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
@@ -641,8 +684,14 @@ class RunDetailView(APIView):
 class RunCalibrationView(APIView):
     """
     Saves the 5-point gaze calibration the canvas samples before the trials.
-    Body: {"points": [{sx, sy, h, v} x5]} — sx/sy are dot screen fractions,
-    h/v the mean iris ratios sampled while the patient stared at that dot.
+    Body: {"points": [{sx, sy, h, v} x5], "window": {x, y}} — sx/sy are dot
+    screen fractions, h/v the mean iris ratios sampled while the patient stared
+    at that dot. The optional window is the fixation tolerance as ellipse
+    half-axes in screen fractions.
+
+    DELETE clears the calibration and marks the run as calibrating until the
+    next POST, which the fixation endpoint passes on to the runner: it must
+    hold its centre still while the patient stares at the corner dots.
     DELETE clears the calibration.
     """
 
@@ -680,13 +729,25 @@ class RunCalibrationView(APIView):
         # good one: it saves fine, then _apply_calibration quietly discards it
         # on every frame and the run behaves as if nobody had calibrated.
         candidate = {"points": cleaned}
+        window = request.data.get("window")
+        if isinstance(window, dict):
+            try:
+                candidate["window"] = {
+                    "x": float(window["x"]),
+                    "y": float(window["y"]),
+                }
+            except (KeyError, TypeError, ValueError):
+                return Response(
+                    {"error": "window must have numeric x and y."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         spans = _calibration_spans(candidate)
         if spans is None:
             return Response(
                 {"error": "points must include both left/right and top/bottom dots."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        h_span, v_span, _, _ = spans
+        h_span, v_span = spans[0], spans[1]
         usable = (
             abs(h_span) >= MIN_CALIBRATION_SPAN
             and abs(v_span) >= MIN_CALIBRATION_SPAN
@@ -694,6 +755,7 @@ class RunCalibrationView(APIView):
 
         run.gaze_calibration = candidate
         run.save(update_fields=["gaze_calibration"])
+        _tracker_status.setdefault(str(pk), {})["calibrating"] = False
         return Response(
             {
                 "ok": True,
@@ -709,6 +771,7 @@ class RunCalibrationView(APIView):
         run = get_object_or_404(TestRun, pk=pk)
         run.gaze_calibration = None
         run.save(update_fields=["gaze_calibration"])
+        _tracker_status.setdefault(str(pk), {})["calibrating"] = True
         return Response({"ok": True, "calibrated": False})
 
 
@@ -725,6 +788,11 @@ class FixationStatusView(APIView):
         gaze_y = request.data.get("gaze_y")
         raw_h = request.data.get("raw_h")
         raw_v = request.data.get("raw_v")
+        fast_h = request.data.get("fast_h")
+        fast_v = request.data.get("fast_v")
+        # The in-browser tracker applies the calibration itself, with a faster
+        # signal than it posts — its verdict and gaze are kept as sent
+        client_calibrated = bool(request.data.get("client_calibrated"))
 
         if is_fixating is None:
             return Response(
@@ -741,9 +809,16 @@ class FixationStatusView(APIView):
         # If the run is calibrated, override the runner's verdict using the
         # raw iris ratios; on degenerate/malformed calibration keep the
         # runner's own is_fixating.
-        calibrated = False
-        if run.gaze_calibration and raw_h is not None and raw_v is not None:
-            mapped = _apply_calibration(run.gaze_calibration, raw_h, raw_v)
+        calibrated = client_calibrated
+        if (
+            not client_calibrated
+            and run.gaze_calibration
+            and raw_h is not None
+            and raw_v is not None
+        ):
+            mapped = _apply_calibration(
+                run.gaze_calibration, raw_h, raw_v, fast_h, fast_v
+            )
             if mapped is not None:
                 gaze_x, gaze_y, is_fixating = mapped
                 calibrated = True
@@ -794,6 +869,15 @@ class FixationStatusView(APIView):
                 "gaze_x": run.gaze_x,
                 "gaze_y": run.gaze_y,
                 "calibrated": calibrated,
+                # The canvas is showing the calibration dots — see
+                # RunCalibrationView.delete
+                "calibrating": bool(tracker.get("calibrating")),
+                # The fixation ellipse, for the runner's preview box
+                "window": (
+                    dict(zip(("x", "y"), _fixation_window(run.gaze_calibration)))
+                    if calibrated and run.gaze_calibration
+                    else None
+                ),
             }
         )
 
