@@ -109,7 +109,8 @@ class TestSessionListSerializer(serializers.ModelSerializer):
             "performed_by",
             "performed_by_name",
             "eye",
-            "notes",
+            "examiner_notes",
+            "patient_notes",
             "session_datetime",
         ]
 
@@ -121,13 +122,25 @@ class TestSessionCreateSerializer(serializers.ModelSerializer):
             "patient",
             "protocol",
             "eye",
-            "notes",
+            "examiner_notes",
+            "patient_notes",
         ]
 
     def create(self, validated_data):
         user = self.context["request"].user
         session = TestSession.objects.create(performed_by=user, **validated_data)
         return session
+
+
+class TestSessionNotesUpdateSerializer(serializers.ModelSerializer):
+    """PATCH sessions/<id>/ — only the notes are editable after creation."""
+
+    class Meta:
+        model = TestSession
+        fields = [
+            "examiner_notes",
+            "patient_notes",
+        ]
 
 
 class TestRunSerializer(serializers.ModelSerializer):

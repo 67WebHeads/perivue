@@ -81,7 +81,10 @@ class TestSession(models.Model):
         User, on_delete=models.SET_NULL, null=True, related_name="performed_sessions"
     )
     eye = models.CharField(max_length=2, choices=EYE_CHOICES)
-    notes = models.TextField(blank=True, null=True)
+    # Examiner's clinical observations (renamed from `notes` — migration 0005)
+    examiner_notes = models.TextField(blank=True, null=True)
+    # Symptoms or concerns reported by the patient themselves
+    patient_notes = models.TextField(blank=True, null=True)
     session_datetime = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

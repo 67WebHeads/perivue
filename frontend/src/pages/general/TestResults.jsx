@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
+import { invalidatePrefix } from '../../cache/Apicache'
+import { summarizeRun, GLOSSARY } from '../../results/plainLanguage'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas-pro'
 
@@ -134,6 +136,54 @@ function MetricCard({ label, value, unit, sub, color }) {
   )
 }
 
+// ─── Plain-language summary ───────────────────────────────────────────────────
+
+const TONE_STYLES = {
+  good:       { chip: 'bg-green-500/15 border-green-500/30 text-green-300',    label: 'Mostly seen' },
+  mixed:      { chip: 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300', label: 'Some dots missed' },
+  concern:    { chip: 'bg-red-500/15 border-red-500/30 text-red-300',          label: 'Many dots missed' },
+  unreliable: { chip: 'bg-orange-500/15 border-orange-500/30 text-orange-300', label: 'May need a repeat' },
+}
+
+function PlainSummary({ run }) {
+  const summary = summarizeRun(run)
+  const tone = TONE_STYLES[summary.tone]
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-semibold">What these results mean</span>
+        <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${tone.chip}`}>
+          {tone.label}
+        </span>
+      </div>
+      <p className="text-base text-white/90 leading-snug">{summary.headline}</p>
+      <ul className="flex flex-col gap-2 list-disc pl-5 text-sm text-white/70 leading-relaxed">
+        {summary.points.map((point, i) => <li key={i}>{point}</li>)}
+      </ul>
+    </div>
+  )
+}
+
+function Glossary() {
+  return (
+    <details className="bg-white/5 border border-white/10 rounded-2xl p-5 group">
+      <summary className="cursor-pointer text-sm font-semibold list-none flex items-center justify-between">
+        Words used in this report
+        <span className="text-white/30 text-xs group-open:hidden">Show</span>
+        <span className="text-white/30 text-xs hidden group-open:inline">Hide</span>
+      </summary>
+      <dl className="mt-4 grid grid-cols-1 sm:grid-cols-[max-content_1fr] gap-x-6 gap-y-3 text-sm">
+        {GLOSSARY.map(([term, meaning]) => (
+          <React.Fragment key={term}>
+            <dt className="text-white/80 font-medium">{term}</dt>
+            <dd className="text-white/55 leading-relaxed">{meaning}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </details>
+  )
+}
+
 // ─── Run Panel ────────────────────────────────────────────────────────────────
 
 function RunPanel({ run }) {
@@ -157,6 +207,7 @@ function RunPanel({ run }) {
 
   return (
     <div className="flex flex-col gap-5">
+      <PlainSummary run={run} />
       <div className="flex gap-4 md:flex-row flex-col items-center  justify-center bg-black/40 rounded-2xl border border-white/10 p-4">
         <div className="flex flex-col items-center gap-3">
           <FieldMap
@@ -180,9 +231,13 @@ function RunPanel({ run }) {
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-5 h-0.5 bg-purple-400 inline-block" />
-              Isopter
+              Edge of side vision (isopter)
             </span>
           </div>
+          <p className="text-[11px] text-white/30 text-center max-w-[280px] leading-snug">
+            The cross is where the eye looked. Each mark is a spot where a dot flashed,
+            seen from the patient&apos;s side.
+          </p>
         </div>
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-2">
@@ -190,28 +245,30 @@ function RunPanel({ run }) {
               label="Detection Accuracy"
               value={m.detection_accuracy}
               unit="%"
-              sub={`${m.stimuli_seen}/${m.stimuli_total} stimuli seen`}
+              sub={`Saw ${m.stimuli_seen} of ${m.stimuli_total} flashing dots`}
               color={detectionColor}
             />
             <MetricCard
               label="Avg Reaction Time"
               value={m.avg_reaction_time}
               unit="ms"
-              sub="Across seen stimuli"
+              sub={m.avg_reaction_time != null
+                ? `About ${(m.avg_reaction_time / 1000).toFixed(1)} s from dot to button press`
+                : 'Time from dot to button press'}
               color="yellow"
             />
             <MetricCard
               label="Kinetic Boundary"
               value={m.kinetic_boundary_points}
               unit={`/ ${m.kinetic_total}`}
-              sub="Points with response"
+              sub="Moving dots noticed before reaching the centre"
               color="purple"
             />
             <MetricCard
               label="Test Reliability"
               value={m.reliability}
               unit="%"
-              sub={`${run.fixation_loss_count} fixation loss${run.fixation_loss_count !== 1 ? 'es' : ''}`}
+              sub={`How steadily the eye stayed on the centre · looked away ${run.fixation_loss_count} time${run.fixation_loss_count !== 1 ? 's' : ''}`}
               color={reliabilityColor}
             />
           </div>
@@ -347,6 +404,27 @@ function PrintableFieldMap({ eye, staticResults, kineticResults }) {
 }
 
 // ─── Printable Report (formal clinical layout) ────────────────────────────────
+
+// ─── Printable plain-language summary ─────────────────────────────────────────
+
+function PrintableSummary({ run }) {
+  const summary = summarizeRun(run)
+  return (
+    <div style={{
+      marginTop: 12, padding: '10px 0', background: '#ffffff',
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#5b2da3', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        What this means
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#111', margin: '4px 0 6px' }}>
+        {summary.headline}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 10.5, color: '#333', lineHeight: 1.5 }}>
+        {summary.points.map((point, i) => <li key={i}>{point}</li>)}
+      </ul>
+    </div>
+  )
+}
 
 function PrintableReport({ session, patient, runs }) {
   const SEX_LABELS = { M: 'Male', F: 'Female', X: 'Other', U: 'Unknown' }
@@ -499,14 +577,14 @@ function PrintableReport({ session, patient, runs }) {
                   <tbody>
                     {[
                       ['Detection Accuracy', `${m.detection_accuracy}%`,
-                        `${m.stimuli_seen} of ${m.stimuli_total} static stimuli seen`],
+                        `Saw ${m.stimuli_seen} of ${m.stimuli_total} flashing dots`],
                       ['Avg. Reaction Time', m.avg_reaction_time != null ? `${m.avg_reaction_time} ms` : '—',
-                        'Across seen static stimuli'],
+                        'Time from dot to button press'],
                       ['Kinetic Boundary',
                         `${m.kinetic_boundary_points} / ${m.kinetic_total}`,
-                        'Points yielding a boundary response'],
+                        'Moving dots noticed before reaching the centre'],
                       ['Test Reliability', `${m.reliability}%`,
-                        `${run.fixation_loss_count} fixation loss${run.fixation_loss_count !== 1 ? 'es' : ''}`],
+                        `Eye looked away from the centre ${run.fixation_loss_count} time${run.fixation_loss_count !== 1 ? 's' : ''}`],
                       ['Status', run.status, `Duration: ${duration}`],
                     ].map(([label, val, sub]) => (
                       <tr key={label} style={{ borderBottom: '1px solid #eee' }}>
@@ -520,26 +598,30 @@ function PrintableReport({ session, patient, runs }) {
                 <div style={{ marginTop: 10, fontSize: 9, color: '#666', display: 'flex', gap: 14 }}>
                   <span>● Seen (green)</span>
                   <span>✕ Not seen (red)</span>
-                  <span>― Isopter (purple)</span>
+                  <span>― Edge of side vision / isopter (purple)</span>
                 </div>
               </div>
             </div>
+            <PrintableSummary run={run} />
           </div>
         )
       })}
 
       {/* Notes */}
-      {session.notes && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={sectionTitle}>Clinician Notes</div>
+      {[
+        ['Patient Notes', session.patient_notes],
+        ['Examiner Notes', session.examiner_notes],
+      ].filter(([, text]) => text).map(([title, text]) => (
+        <div key={title} style={{ marginBottom: 20 }}>
+          <div style={sectionTitle}>{title}</div>
           <p style={{
             fontSize: 11, color: '#333', lineHeight: 1.5,
             whiteSpace: 'pre-wrap', margin: 0,
           }}>
-            {session.notes}
+            {text}
           </p>
         </div>
-      )}
+      ))}
 
       {/* Signature */}
       <div style={{ marginTop: 32, display: 'flex', gap: 40 }}>
@@ -570,6 +652,102 @@ function PrintableReport({ session, patient, runs }) {
         This report was generated by PeriVue, the digital tangent screen system used by CEU Eye Clinic.
         Results are intended for use by qualified eye-care professionals and should be interpreted
         in the context of a complete ophthalmic examination.
+      </div>
+    </div>
+  )
+}
+
+// ─── Notes panel ──────────────────────────────────────────────────────────────
+
+function NotesPanel({ session, authFetch, onSaved }) {
+  const [examinerNotes, setExaminerNotes] = useState(session.examiner_notes || '')
+  const [patientNotes,  setPatientNotes]  = useState(session.patient_notes || '')
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState(null)
+
+  const dirty =
+    examinerNotes !== (session.examiner_notes || '') ||
+    patientNotes  !== (session.patient_notes || '')
+
+  async function handleSave() {
+    setSaving(true)
+    setStatus(null)
+    try {
+      const res = await authFetch(`${API_BASE_URL}/api/visual-tests/sessions/${session.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          examiner_notes: examinerNotes.trim() || null,
+          patient_notes:  patientNotes.trim() || null,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to save notes')
+      const updated = await res.json()
+      // Session lists (Records, Dashboard) carry the notes too
+      invalidatePrefix(`${API_BASE_URL}/api/visual-tests/sessions/`)
+      setExaminerNotes(updated.examiner_notes || '')
+      setPatientNotes(updated.patient_notes || '')
+      onSaved({ examiner_notes: updated.examiner_notes, patient_notes: updated.patient_notes })
+      setStatus({ type: 'success', msg: 'Notes saved' })
+    } catch (err) {
+      setStatus({ type: 'error', msg: err.message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fields = [
+    {
+      id: 'patient-notes',
+      label: 'Patient Notes',
+      hint: 'Symptoms or concerns reported by the patient',
+      value: patientNotes,
+      onChange: setPatientNotes,
+    },
+    {
+      id: 'examiner-notes',
+      label: 'Examiner Notes',
+      hint: 'Observations during the test — cooperation, fixation, reliability',
+      value: examinerNotes,
+      onChange: setExaminerNotes,
+    },
+  ]
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
+      <span className="text-sm font-semibold">Notes</span>
+
+      {fields.map(f => (
+        <label key={f.id} htmlFor={f.id} className="flex flex-col gap-1.5">
+          <span className="flex items-baseline gap-2">
+            <span className="text-xs text-white/50 uppercase tracking-wider">{f.label}</span>
+            <span className="text-xs text-white/25">{f.hint}</span>
+          </span>
+          <textarea
+            id={f.id}
+            rows={3}
+            value={f.value}
+            onChange={e => { f.onChange(e.target.value); setStatus(null) }}
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80
+              focus:border-purple-500/50 focus:outline-none resize-y"
+          />
+        </label>
+      ))}
+
+      <div className="flex items-center justify-end gap-3">
+        {status && (
+          <p className={`text-xs ${status.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+            {status.msg}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="text-xs px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white
+            transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? 'Saving…' : 'Save notes'}
+        </button>
       </div>
     </div>
   )
@@ -889,15 +1067,14 @@ export default function TestResults() {
         {/* Run panel */}
         {activeRun && <RunPanel run={activeRun} />}
 
-        {/* Notes */}
-        {session.notes && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
-            <p className="text-xs text-white/30 uppercase tracking-wider mb-2">Session Notes</p>
-            <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap">
-              {session.notes}
-            </p>
-          </div>
-        )}
+        <Glossary />
+
+        {/* Notes — editable; saved notes also appear in the PDF report */}
+        <NotesPanel
+          session={session}
+          authFetch={authFetch}
+          onSaved={updated => setData(d => ({ ...d, session: { ...d.session, ...updated } }))}
+        />
 
       </div>
 

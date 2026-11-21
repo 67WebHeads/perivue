@@ -3,22 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import API_BASE_URL from '../../config/api'
 import { BROWSER_TRACKING, startBrowserTracker } from '../../tracking/browserTracker'
-
-const RINGS = [5, 10, 15, 20, 25, 30, 35]
-const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315]
-// Each key is the internal spoke angleDeg (drawGrid uses angleDeg-90 as canvas rotation,
-// so angleDeg=0 draws UPWARD, angleDeg=90 draws RIGHTWARD, etc).
-// Values are labels matching the clinical reference image: 0 left, 90 top, 180 right, 270 bottom.
-const ANGLE_LABELS = {
-  0:   '90',   // spoke upward      → 90
-  45:  '135',   // spoke upper-right → 45
-  90:  '180',    // spoke rightward   → 0
-  135: '225',  // spoke lower-right → 315
-  180: '270',  // spoke downward    → 270
-  225: '315',  // spoke lower-left  → 225
-  270: '0',  // spoke leftward    → 180
-  315: '45',  // spoke upper-left  → 135
-}
+import {
+  STIMULUS_COLORS, STIMULUS_COLOR_KEY, DEFAULT_STIMULUS_COLOR, TANGENT_OPACITY_KEY,
+  stimulusCss, readPref, savePref, readViewingDistance, projectionFor,
+} from '../../config/projection'
+import { drawGrid, drawDot } from '../../canvas/tangentGrid'
+import StimulusPreview from '../../components/StimulusPreview'
 
 // ─── Hard-coded default protocol ──────────────────────────────────────────────
 //
@@ -101,95 +91,12 @@ const CALIBRATION_TARGETS = [
   [0.90, 0.90],
 ]
 
+function readInitialOpacity() {
+  const n = Number(readPref(TANGENT_OPACITY_KEY, 100))
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 100
+}
+
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
-
-function drawGrid(canvas, opacity = 1) {
-  const ctx = canvas.getContext('2d')
-  const W = canvas.width
-  const H = canvas.height
-  const cx = W / 2
-  const cy = H / 2
-  const maxRing = RINGS[RINGS.length - 1]
-  const scale = Math.min(W, H) * 0.44 / maxRing
-  // Lets the clinician fade the printed tangent screen behind the projection
-  // without dimming the stimulus dot — see the settings panel
-  const gridOpacity = Math.max(0, Math.min(1, opacity))
-  const white = (alpha) => `rgba(255,255,255,${alpha * gridOpacity})`
-
-  ctx.clearRect(0, 0, W, H)
-  ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, W, H)
-
-  RINGS.forEach(r => {
-    const px = r * scale
-    ctx.beginPath()
-    ctx.arc(cx, cy, px, 0, Math.PI * 2)
-    ctx.strokeStyle = white(0.7)
-    ctx.lineWidth = r === maxRing ? 2 : 1
-    ctx.stroke()
-    if (r < maxRing) {
-      ctx.fillStyle = white(0.7)
-      ctx.font = `${Math.max(10, scale * 1.1)}px monospace`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'bottom'
-      ctx.fillText(String(r), cx, cy - px - 3)
-    }
-  })
-
-  SPOKES.forEach(angleDeg => {
-    const rad = (angleDeg - 90) * (Math.PI / 180)
-    const outerPx = maxRing * scale
-    ctx.beginPath()
-    ctx.moveTo(cx, cy)
-    ctx.lineTo(cx + outerPx * Math.cos(rad), cy + outerPx * Math.sin(rad))
-    ctx.strokeStyle = white(0.55)
-    ctx.lineWidth = 0.6
-    ctx.stroke()
-  })
-
-  const labelR = (maxRing + 4) * scale
-  SPOKES.forEach(angleDeg => {
-    const rad = (angleDeg - 90) * (Math.PI / 180)
-    const lx = cx + labelR * Math.cos(rad)
-    const ly = cy + labelR * Math.sin(rad)
-    ctx.fillStyle = white(0.9)
-    ctx.font = `${Math.max(11, scale * 1.3)}px monospace`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(ANGLE_LABELS[angleDeg], lx, ly)
-  })
-
-  const crossAngles = Array.from({ length: 16 }, (_, i) => i * (Math.PI / 8))
-  const innerR = scale * 0.5
-  const outerR = scale * 1.6
-  ctx.strokeStyle = white(1.0)
-  ctx.lineWidth = 1.2
-  crossAngles.forEach(a => {
-    ctx.beginPath()
-    ctx.moveTo(cx + innerR * Math.cos(a), cy + innerR * Math.sin(a))
-    ctx.lineTo(cx + outerR * Math.cos(a), cy + outerR * Math.sin(a))
-    ctx.stroke()
-  })
-
-  ctx.beginPath()
-  ctx.arc(cx, cy, 2, 0, Math.PI * 2)
-  ctx.fillStyle = white(1.0)
-  ctx.fill()
-
-  return { cx, cy, scale }
-}
-
-function drawDot(canvas, meta, xDeg, yDeg, color = 'white', sizeDeg = 0.5) {
-  const ctx = canvas.getContext('2d')
-  const { cx, cy, scale } = meta
-  const px = cx + xDeg * scale
-  const py = cy - yDeg * scale
-  const radius = Math.max(4, sizeDeg * scale * 2)
-  ctx.beginPath()
-  ctx.arc(px, py, radius, 0, Math.PI * 2)
-  ctx.fillStyle = color
-  ctx.fill()
-}
 
 function drawCalibrationDot(canvas, meta, pulse) {
   const ctx = canvas.getContext('2d')
@@ -355,6 +262,78 @@ function BrowserTrackerPanel({ status, previewCanvasRef, trackerRef }) {
   )
 }
 
+// ─── Pre-test instructions ────────────────────────────────────────────────────
+// Projected to the patient, so the text is large and plain. Opens from the
+// Begin test button; Start test then runs handleStart (calibration → trials).
+function PreTestInstructions({ eye, eyeTracking, onBack, onStart }) {
+  const coveredEye = eye === 'OD' ? 'left' : eye === 'OS' ? 'right' : null
+
+  const steps = [
+    'Sit comfortably and keep your head still for the whole test.',
+    coveredEye && `Keep your ${coveredEye} eye covered until the test is finished.`,
+    'Always look at the cross in the centre. Do not move your eyes to search for the dots.',
+    eyeTracking && 'First, a few dots will appear near the corners. Look at each one when asked. This lets the camera learn where you are looking.',
+    'Press the button as soon as you see a dot, whether it flashes or slowly moves in from the edge.',
+    'It is normal to miss some dots. Blink normally and stay relaxed.',
+  ].filter(Boolean)
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm cursor-auto p-6"
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pretest-title"
+        className="w-full max-w-2xl rounded-2xl border border-white/12 bg-[#10101f] p-8 text-white shadow-2xl"
+      >
+        <h2 id="pretest-title" className="text-2xl font-semibold">Before we begin</h2>
+        <p className="mt-1 text-sm text-white/40">Please read these instructions carefully.</p>
+
+        <ol className="mt-6 flex flex-col gap-4">
+          {steps.map((text, i) => (
+            <li key={i} className="flex gap-4">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full
+                bg-purple-500/20 border border-purple-500/30 text-sm font-medium text-purple-200">
+                {i + 1}
+              </span>
+              <span className="text-lg leading-snug text-white/85">{text}</span>
+            </li>
+          ))}
+        </ol>
+
+        <p className="mt-6 text-sm text-white/35">
+          Tell the examiner if you feel uncomfortable or need a break. The test can be paused at any time.
+        </p>
+
+        <div className="mt-8 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-6 py-3 rounded-xl text-sm font-medium
+              bg-white/5 border border-white/10 text-white/50
+              hover:bg-white/10 hover:text-white transition-all"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={onStart}
+            autoFocus
+            className="px-8 py-3 rounded-xl text-sm font-medium tracking-wide
+              bg-purple-500/20 border border-purple-500/30 text-white
+              hover:bg-purple-500/30 hover:border-purple-500/50
+              active:scale-95 transition-all"
+          >
+            Start test
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function TestScreen() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
@@ -376,8 +355,18 @@ export default function TestScreen() {
   // being sampled — null whenever calibration is not running
   const [calibStep, setCalibStep] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [tangentScreenOpacity, setTangentScreenOpacity] = useState(100)
-  const tangentScreenOpacityRef = useRef(100)
+  // Pre-test instructions for the patient — shown on the projection when the
+  // clinician presses Begin test, before calibration and the first stimulus
+  const [instructionsOpen, setInstructionsOpen] = useState(false)
+  // Remembered per browser, so the clinician sets them once for this projector
+  const [tangentScreenOpacity, setTangentScreenOpacity] = useState(readInitialOpacity)
+  const tangentScreenOpacityRef = useRef(tangentScreenOpacity)
+  const [stimulusColor, setStimulusColor] = useState(
+    () => readPref(STIMULUS_COLOR_KEY, DEFAULT_STIMULUS_COLOR)
+  )
+  const stimulusColorRef = useRef(stimulusColor)
+  // Read once per canvas load; set on the Settings page's projector guide
+  const [viewingDistance] = useState(readViewingDistance)
 
   // ── Fixation-loss auto-pause ──────────────────────────────────────────────
   // When the (calibrated) gaze leaves the center, the test halts on the
@@ -446,7 +435,16 @@ export default function TestScreen() {
     const nextOpacity = Number(e.target.value)
     setTangentScreenOpacity(nextOpacity)
     tangentScreenOpacityRef.current = nextOpacity
+    savePref(TANGENT_OPACITY_KEY, nextOpacity)
     redrawGrid(canvasRef, gridMeta, nextOpacity / 100)
+  }
+
+  // Applies from the next stimulus; each trial records the colour it used
+  function handleStimulusColorChange(e) {
+    const next = e.target.value
+    setStimulusColor(next)
+    stimulusColorRef.current = next
+    savePref(STIMULUS_COLOR_KEY, next)
   }
 
   useEffect(() => {
@@ -575,6 +573,7 @@ export default function TestScreen() {
       angle_deg: point.angle_deg !== null ? String(point.angle_deg) : null,
       start_radius_deg: point.start_radius_deg !== null ? String(point.start_radius_deg) : null,
       is_blindspot_check: point.is_blindspot_check,
+      stimulus_color: stimulusColorRef.current,
       result,
       response_time_ms: responseTimeMs,
       boundary_x_deg: boundaryX,
@@ -609,7 +608,8 @@ export default function TestScreen() {
 
     trialActiveRef.current = true
     trialStartRef.current  = null               // set after dot appears
-    const { stimulus_size_deg: sizeDeg, stimulus_color: color } = DEFAULT_PROTOCOL_SETTINGS
+    const { stimulus_size_deg: sizeDeg } = DEFAULT_PROTOCOL_SETTINGS
+    const color = stimulusCss(stimulusColorRef.current)
     const delay = 200 + Math.random() * 400
 
     setTimeout(() => {
@@ -638,7 +638,8 @@ export default function TestScreen() {
     trialActiveRef.current = true
     trialStartRef.current  = performance.now()
 
-    const { kinetic_speed_deg_per_sec: speedDegPerSec, stimulus_color: color, stimulus_size_deg: sizeDeg } = DEFAULT_PROTOCOL_SETTINGS
+    const { kinetic_speed_deg_per_sec: speedDegPerSec, stimulus_size_deg: sizeDeg } = DEFAULT_PROTOCOL_SETTINGS
+    const color = stimulusCss(stimulusColorRef.current)
     const angleDeg    = point.angle_deg
     const startRadius = point.start_radius_deg
     const angleRad    = angleDeg * (Math.PI / 180)
@@ -1459,7 +1460,7 @@ export default function TestScreen() {
                 </button>
               ) : (
                 <button
-                  onClick={handleStart}
+                  onClick={() => setInstructionsOpen(true)}
                   disabled={!runId}
                   className="px-8 py-3 rounded-xl text-sm font-medium tracking-wide
                     bg-white/10 border border-white/20 text-white/80
@@ -1473,6 +1474,17 @@ export default function TestScreen() {
           </div>
         </div>
       )}
+      {instructionsOpen && (
+        <PreTestInstructions
+          eye={runEye}
+          eyeTracking={eyeTracking}
+          onBack={() => setInstructionsOpen(false)}
+          onStart={() => {
+            setInstructionsOpen(false)
+            handleStart()
+          }}
+        />
+      )}
       {settingsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm cursor-auto p-4"
@@ -1480,7 +1492,7 @@ export default function TestScreen() {
           onDoubleClick={(e) => e.stopPropagation()}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/12 bg-[#10101f] p-5 text-white shadow-2xl"
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-white/12 bg-[#10101f] p-5 text-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
@@ -1505,7 +1517,11 @@ export default function TestScreen() {
               </button>
             </div>
 
-            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="mt-5">
+              <StimulusPreview opacity={tangentScreenOpacity} color={stimulusColor} />
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
               <div className="mb-3 flex items-center justify-between gap-4">
                 <label htmlFor="tangent-screen-opacity" className="text-xs font-medium text-white/65">
                   Tangent screen opacity
@@ -1528,6 +1544,47 @@ export default function TestScreen() {
                 <span>0%</span>
                 <span>100%</span>
               </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor="stimulus-color" className="text-xs font-medium text-white/65">
+                  Stimulus colour
+                </label>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-3 w-3 rounded-full border border-white/20"
+                    style={{ backgroundColor: stimulusCss(stimulusColor) }}
+                    aria-hidden="true"
+                  />
+                  <select
+                    id="stimulus-color"
+                    value={stimulusColor}
+                    onChange={handleStimulusColorChange}
+                    className="rounded-lg border border-white/15 bg-[#15152a] px-2 py-1 text-xs text-white/80"
+                  >
+                    {STIMULUS_COLORS.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-white/30">
+                Applies from the next dot. The colour is saved with each result.
+              </p>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-[11px] leading-relaxed text-white/40">
+              <p className="text-xs font-medium text-white/65">Projector size check</p>
+              <p className="mt-1">
+                With the patient at <span className="text-white/75">{viewingDistance} cm</span>,
+                the outer 35° ring should measure{' '}
+                <span className="text-white/75">
+                  {projectionFor(viewingDistance).outerDiameter.toFixed(1)} cm
+                </span>{' '}
+                across on the screen, both horizontally and vertically.
+                Change the distance in Settings → Projector setup.
+              </p>
             </div>
           </div>
         </div>
