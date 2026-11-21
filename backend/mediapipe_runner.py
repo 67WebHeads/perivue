@@ -314,14 +314,10 @@ def estimate_gaze(avg_h, avg_v):
     return max(0.0, min(1.0, screen_x)), max(0.0, min(1.0, screen_y))
 
 
-# Fallback for the preview box once calibrated — the server decides fixation
-# from screen coordinates and returns the run's own window (the canvas's
-# fixation tolerance) with every POST. Display only.
-SERVER_FIXATION_WINDOW = 0.06
-# Short running median of the per-frame ratios, posted as fast_h/fast_v. The
-# server decides calibrated fixation from it: it ignores single-frame landmark
-# spikes yet follows a glance within ~2 frames, where the EMA lags ~0.5s.
-FAST_FRAMES = 5
+# Mirrors FIXATION_WINDOW in visual_tests/views.py — once a calibration exists
+# the server decides fixation from screen coordinates, so the preview has to
+# draw the server's window rather than this file's. Display only; keep in sync.
+SERVER_FIXATION_WINDOW = 0.12
 
 
 # ── POST to Django ────────────────────────────────────────────────────────────
@@ -329,14 +325,7 @@ FAST_FRAMES = 5
 # Supabase DB can be slow, and stacking requests caused broken-pipe spam.
 _post_pending = threading.Event()
 _server_lock = threading.Lock()
-_server_state = {
-    "is_fixating": None,
-    "gaze_x": None,
-    "gaze_y": None,
-    "calibrated": False,
-    "calibrating": False,
-    "window": None,
-}
+_server_state = {"is_fixating": None, "gaze_x": None, "gaze_y": None, "calibrated": False}
 
 
 def _post_fixation_worker(payload):
@@ -349,8 +338,6 @@ def _post_fixation_worker(payload):
                 _server_state["gaze_x"] = data.get("gaze_x")
                 _server_state["gaze_y"] = data.get("gaze_y")
                 _server_state["calibrated"] = bool(data.get("calibrated"))
-                _server_state["window"] = data.get("window")
-                _server_state["calibrating"] = bool(data.get("calibrating"))
     except Exception as e:
         log(f"[warn] Failed to POST fixation: {e}")
     finally:
@@ -445,7 +432,6 @@ gaze_x = 0.5
 gaze_y = 0.5
 ema_h = None
 ema_v = None
-fast_buf = []  # last FAST_FRAMES (avg_h, avg_v) — see FAST_FRAMES
 face_detected = False
 # Per-person center reference — median of the first BASELINE_FRAMES clean
 # (face visible, not blinking) frames. Nothing is streamed until it exists.
@@ -591,13 +577,7 @@ with mp_face_mesh.FaceMesh(
                     # expressed in these baseline-relative ratios, so drifting
                     # the baseline underneath it moves the calibrated origin
                     # too and the calibration decays as the run goes on.
-                    #
-                    # Also frozen while the canvas shows the calibration dots:
-                    # the corner dots sit inside the uncalibrated window, so
-                    # the center used to creep toward each dot being stared at
-                    # and bend the calibration out of shape.
-                    srv_now = get_server_state()
-                    if fixating and not srv_now["calibrated"] and not srv_now["calibrating"]:
+                    if fixating and not get_server_state()["calibrated"]:
                         baseline_h += BASELINE_ADAPT * (avg_h - 0.5)
                         baseline_v += BASELINE_ADAPT * (avg_v - 0.5)
 
@@ -605,8 +585,6 @@ with mp_face_mesh.FaceMesh(
                     ema_v = avg_v if ema_v is None else EMA_ALPHA * avg_v + (1 - EMA_ALPHA) * ema_v
                     gaze_x, gaze_y = estimate_gaze(ema_h, ema_v)
                     face_detected = True
-                    fast_buf.append((avg_h, avg_v))
-                    del fast_buf[:-FAST_FRAMES]
 
                     if fixating:
                         last_good_time = now
@@ -619,10 +597,8 @@ with mp_face_mesh.FaceMesh(
             if now - last_good_time >= BAD_THRESHOLD_SECS:
                 currently_fixating = False
             gaze_x, gaze_y = 0.5, 0.5
-            fast_buf.clear()
 
         if now - last_post_time >= post_interval:
-            fast_ok = face_detected and len(fast_buf) >= 3
             posted = post_fixation(
                 {
                     "is_fixating": currently_fixating,
@@ -632,9 +608,6 @@ with mp_face_mesh.FaceMesh(
                     # during calibration; null when no face is detected
                     "raw_h": round(ema_h, 4) if face_detected and ema_h is not None else None,
                     "raw_v": round(ema_v, 4) if face_detected and ema_v is not None else None,
-                    # Running median — what the server judges fixation on
-                    "fast_h": round(sorted(s[0] for s in fast_buf)[len(fast_buf) // 2], 4) if fast_ok else None,
-                    "fast_v": round(sorted(s[1] for s in fast_buf)[len(fast_buf) // 2], 4) if fast_ok else None,
                     # Lets the canvas show camera health before the test starts
                     "camera_ok": not feed_is_black,
                 }
@@ -717,9 +690,7 @@ with mp_face_mesh.FaceMesh(
         # so "is the patient still looking straight ahead" is a question you can
         # answer by looking rather than by reading two decimals
         if srv["calibrated"]:
-            window = srv.get("window") or {}
-            box_h = window.get("x", SERVER_FIXATION_WINDOW)
-            box_v = window.get("y", SERVER_FIXATION_WINDOW)
+            box_h = box_v = SERVER_FIXATION_WINDOW
         else:
             box_h = FIX_HALF_H / (2 * GAZE_HALF_H)
             box_v = FIX_HALF_V / (2 * GAZE_HALF_V)
@@ -824,7 +795,6 @@ with mp_face_mesh.FaceMesh(
             occlusion_frames = 0
             ema_h = None
             ema_v = None
-            fast_buf.clear()
             log(
                 f"Horizontal flip toggled {'on' if flip_enabled else 'off'} — "
                 f"re-learning baseline. If a calibration was saved for this "
@@ -842,7 +812,6 @@ with mp_face_mesh.FaceMesh(
             occlusion_frames = 0
             ema_h = None
             ema_v = None
-            fast_buf.clear()
             log("Re-learning center baseline (requested with [R])")
 
 cap.release()
