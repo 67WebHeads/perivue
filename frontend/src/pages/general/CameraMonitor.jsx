@@ -19,6 +19,9 @@ export default function CameraMonitor() {
   const canvasRef = useRef(null)
   const channelRef = useRef(null)
   const [info, setInfo] = useState(null) // { runId, eye, status } from the test page
+  // The test page's open-ended button check, mirrored here so the clinician
+  // can follow presses and move on from the laptop screen
+  const [buttonCheck, setButtonCheck] = useState({ running: false, presses: 0, input: null })
   const [lastSeen, setLastSeen] = useState(0)
   const [now, setNow] = useState(() => Date.now())
 
@@ -32,9 +35,12 @@ export default function CameraMonitor() {
       if (data?.type === 'status') {
         setInfo({ runId: data.runId, eye: data.eye, status: data.status })
         setLastSeen(Date.now())
+      } else if (data?.type === 'buttonCheck') {
+        setButtonCheck({ running: Boolean(data.running), presses: data.presses || 0, input: data.input })
       } else if (data?.type === 'ended') {
         setInfo(null)
         setLastSeen(0)
+        setButtonCheck({ running: false, presses: 0, input: null })
       } else if (data?.type === 'frame' && data.blob && !drawing) {
         setLastSeen(Date.now())
         const canvas = canvasRef.current
@@ -100,6 +106,31 @@ export default function CameraMonitor() {
           {connected ? 'Live' : 'Waiting for test'}
         </span>
       </div>
+
+      {/* Above the picture so it is never scrolled out of view */}
+      {connected && buttonCheck.running && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-purple-500/25 bg-purple-500/10 px-3 py-2.5">
+          <div className="text-xs">
+            <p className="text-purple-100/90 font-medium">
+              Button check —{' '}
+              {buttonCheck.presses > 0
+                ? `${buttonCheck.presses} ${buttonCheck.presses === 1 ? 'press' : 'presses'} received (last: ${buttonCheck.input === 'mouse' ? 'mouse click' : 'key press'})`
+                : 'no presses yet'}
+            </p>
+            <p className="text-purple-100/55 mt-0.5">
+              Swap the clicker if presses don&apos;t show up, then click Next
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => send('buttonCheckNext')}
+            disabled={buttonCheck.presses === 0}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-purple-500/25 border border-purple-400/30 text-white text-xs font-medium hover:bg-purple-500/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-white/10 bg-black">
         <canvas ref={canvasRef} className={`w-full h-full object-contain ${connected ? '' : 'invisible'}`} />
