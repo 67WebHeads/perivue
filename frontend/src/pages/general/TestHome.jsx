@@ -4,6 +4,7 @@ import API_BASE_URL from "../../config/api";
 import { useNavigate } from "react-router-dom";
 import { cachedFetch, invalidate, invalidatePrefix } from "../../cache/Apicache";
 import { BROWSER_TRACKING } from "../../tracking/browserTracker";
+import { openCameraMonitor } from "../../tracking/cameraMonitor";
 
 function getInitials(name = "") {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
@@ -192,6 +193,14 @@ export default function TestHome() {
 
   async function handleBeginTest() {
     if (!ready) return;
+
+    // Camera preview window for the clinician's screen. Opened here because
+    // browsers only allow pop-ups straight from a click; if it is blocked, the
+    // test page has an "Open camera monitor" button.
+    if (BROWSER_TRACKING && localStorage.getItem('perivue_eye_tracking') !== 'off') {
+      openCameraMonitor();
+    }
+
     setStarting(true);
     setError(null);
 
