@@ -5,6 +5,7 @@ from django.contrib.auth.models import (
     BaseUserManager,
     PermissionsMixin,
 )
+from config.validators import validate_person_name
 
 
 class UserManager(BaseUserManager):
@@ -33,7 +34,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
-    full_name = models.CharField(max_length=255, blank=True, null=True)
+    full_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        validators=[validate_person_name],
+    )
     avatar_url = models.CharField(max_length=500, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="viewer")
     profile_complete = models.BooleanField(

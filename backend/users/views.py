@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model, logout
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.http import HttpResponseRedirect
 from django.views import View
 from rest_framework.views import APIView
@@ -9,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from users.adapters import is_allowed_email
+from config.validators import validate_person_name
 
 User = get_user_model()
 
@@ -16,6 +19,32 @@ ALLOWED_ROLES = {"admin", "clinician", "viewer"}
 
 def is_admin(user):
     return user.role == 'admin'
+
+
+def validation_error_message(exc):
+    return exc.messages[0] if getattr(exc, "messages", None) else str(exc)
+
+
+def validate_user_email(email):
+    if len(email) > 254:
+        return "Email must be 254 characters or fewer."
+    try:
+        validate_email(email)
+    except DjangoValidationError:
+        return "Enter a valid email address."
+    if not is_allowed_email(email):
+        return "Must be a @ceu.edu.ph email."
+    return None
+
+
+def validate_full_name(full_name):
+    if len(full_name) > 255:
+        return "Full name must be 255 characters or fewer."
+    try:
+        validate_person_name(full_name)
+    except DjangoValidationError as exc:
+        return validation_error_message(exc)
+    return None
 
 
 class TestLoginView(APIView):
@@ -28,11 +57,12 @@ class TestLoginView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        email = request.data.get("email")
+        email = request.data.get("email", "").strip().lower()
 
-        if not email or not is_allowed_email(email):
+        email_error = validate_user_email(email)
+        if email_error:
             return Response(
-                {"error": "Must use a @ceu.edu.ph email"},
+                {"error": email_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -90,10 +120,16 @@ class MeView(APIView):
         user = request.user
         data = request.data
 
-        full_name = data.get("full_name", "").strip()
+        full_name = " ".join(data.get("full_name", "").strip().split())
         if not full_name:
             return Response(
                 {"error": "full_name is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name_error = validate_full_name(full_name)
+        if name_error:
+            return Response(
+                {"error": name_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -161,13 +197,15 @@ class UserManagementListCreateView(APIView):
             return Response({"error": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
 
         email     = request.data.get("email", "").strip().lower()
-        full_name = request.data.get("full_name", "").strip()
+        full_name = " ".join(request.data.get("full_name", "").strip().split())
         role      = request.data.get("role", "clinician").strip().lower()
 
-        if not email:
-            return Response({"error": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
-        if not is_allowed_email(email):
-            return Response({"error": "Must be a @ceu.edu.ph email."}, status=status.HTTP_400_BAD_REQUEST)
+        email_error = validate_user_email(email)
+        if email_error:
+            return Response({"error": email_error}, status=status.HTTP_400_BAD_REQUEST)
+        name_error = validate_full_name(full_name)
+        if name_error:
+            return Response({"error": name_error}, status=status.HTTP_400_BAD_REQUEST)
         if role not in {"admin", "clinician", "viewer"}:
             return Response({"error": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
         if User.objects.filter(email=email).exists():
@@ -175,7 +213,7 @@ class UserManagementListCreateView(APIView):
 
         user = User.objects.create(
             email=email,
-            full_name=full_name or email.split("@")[0],
+            full_name=full_name,
             role=role,
             is_active=True,
             profile_complete=True,
@@ -206,7 +244,11 @@ class UserManagementDetailView(APIView):
             return Response({"error": "You cannot change your own role."}, status=status.HTTP_400_BAD_REQUEST)
 
         if "full_name" in request.data:
-            user.full_name = request.data["full_name"].strip()
+            full_name = " ".join(request.data["full_name"].strip().split())
+            name_error = validate_full_name(full_name)
+            if name_error:
+                return Response({"error": name_error}, status=status.HTTP_400_BAD_REQUEST)
+            user.full_name = full_name
         if "role" in request.data:
             role = request.data["role"].strip().lower()
             if role not in {"admin", "clinician", "viewer"}:

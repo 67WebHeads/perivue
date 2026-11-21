@@ -1,8 +1,16 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API_BASE_URL from '../../config/api';
 import { useNavigate } from 'react-router-dom';
 import { cachedFetch, invalidate, invalidatePrefix } from '../../cache/Apicache';
+import { useToast } from '../../context/ToastContext';
+import {
+  apiErrorMessage,
+  INPUT_LIMITS,
+  sanitizeName,
+  sanitizePhone,
+  validatePatientForm,
+} from '../../utils/validation';
 
 const inputClass = `
   w-full px-3 py-2 rounded-lg text-sm
@@ -31,7 +39,7 @@ const emptyForm = {
 };
 
 // ── Custom Select ─────────────────────────────────────────────────────────────
-function CustomSelect({ value, onChange, options, placeholder, name }) {
+function CustomSelect({ value, onChange, options, placeholder, name, ariaLabel }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const selected = options.find(o => o.value === value);
@@ -49,6 +57,7 @@ function CustomSelect({ value, onChange, options, placeholder, name }) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
+        aria-label={ariaLabel}
         className="w-full px-3 py-2 rounded-lg text-sm text-left
           bg-white/5 border border-white/10 text-white
           focus:outline-none focus:border-white/30
@@ -100,6 +109,13 @@ const SEX_OPTIONS = [
   { value: "F", label: "Female" },
   { value: "X", label: "Other" },
   { value: "U", label: "Unknown" },
+];
+
+const SORT_OPTIONS = [
+  { value: "date-desc", label: "Newest first" },
+  { value: "date-asc", label: "Oldest first" },
+  { value: "name-asc", label: "Name: A–Z" },
+  { value: "name-desc", label: "Name: Z–A" },
 ];
 
 // ── Test history table inside patient modal ───────────────────────────────────
@@ -166,11 +182,14 @@ function PatientTestHistory({ patientId, authFetch }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Records() {
   const { authFetch } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
 
   const [patients, setPatients]           = useState([]);
   const [staff, setStaff]                 = useState([]);
   const [loading, setLoading]             = useState(true);
   const [search, setSearch]               = useState("");
+  const [sortBy, setSortBy]               = useState("date-desc");
   const [selected, setSelected]           = useState(null);
   const [isEditing, setIsEditing]         = useState(false);
   const [editForm, setEditForm]           = useState({});
@@ -181,6 +200,7 @@ export default function Records() {
   const [showNewTest, setShowNewTest]     = useState(false);
   const [form, setForm]                   = useState(emptyForm);
   const [submitting, setSubmitting]       = useState(false);
+  const [submitIntent, setSubmitIntent]   = useState(null);
   const [error, setError]                 = useState(null);
 
   // Staff: 10 min TTL — rarely changes
@@ -222,28 +242,53 @@ export default function Records() {
   }, [search, fetchPatients]);
 
   function handleFormChange(e) {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name } = e.target;
+    let { value } = e.target;
+    if (name === "first_name" || name === "last_name") value = sanitizeName(value);
+    if (name === "phone") value = sanitizePhone(value);
+    setForm(prev => ({ ...prev, [name]: value }));
   }
 
-  async function handleSaveNewPatient() {
-    setSubmitting(true); setError(null);
+  async function handleSaveNewPatient(startTest = false) {
+    const validationError = validatePatientForm(form);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setSubmitting(true);
+    setSubmitIntent(startTest ? "start" : "save");
+    setError(null);
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/`, {
         method: "POST",
         body: JSON.stringify(form),
       });
-      if (!res.ok) throw new Error(JSON.stringify(await res.json()));
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(await res.json(), "Failed to create patient."));
+      }
+      const createdPatient = await res.json();
 
       // Bust the base patient list so the next load gets fresh data
       invalidatePrefix(`${API_BASE_URL}/api/patients/`);
       // Also bust dashboard stats (total_patients just went up)
       invalidate(`${API_BASE_URL}/api/visual-tests/dashboard/stats/`);
 
-      await fetchPatients(search, true);
-      setShowNewTest(false);
-      setForm(emptyForm);
+      if (startTest) {
+        setShowNewTest(false);
+        setForm(emptyForm);
+        toast.success("Patient created. Complete the test setup.");
+        navigate(`/test-menu?patient_id=${createdPatient.id}`);
+      } else {
+        await fetchPatients(search, true);
+        setShowNewTest(false);
+        setForm(emptyForm);
+        toast.success("Patient created");
+      }
     } catch (err) { setError(err.message); }
-    finally { setSubmitting(false); }
+    finally {
+      setSubmitting(false);
+      setSubmitIntent(null);
+    }
   }
 
   function handleCloseNewTest() { setShowNewTest(false); setForm(emptyForm); setError(null); }
@@ -260,19 +305,30 @@ export default function Records() {
   }
 
   function handleEditChange(e) {
-    setEditForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name } = e.target;
+    let { value } = e.target;
+    if (name === "first_name" || name === "last_name") value = sanitizeName(value);
+    if (name === "phone") value = sanitizePhone(value);
+    setEditForm(prev => ({ ...prev, [name]: value }));
   }
 
   function handleCancelEdit() { setIsEditing(false); setEditError(null); }
 
   async function handleSaveEdit() {
+    const validationError = validatePatientForm(editForm);
+    if (validationError) {
+      setEditError(validationError);
+      return;
+    }
     setSaving(true); setEditError(null);
     try {
       const res = await authFetch(`${API_BASE_URL}/api/patients/${selected.id}/`, {
         method: "PATCH",
         body: JSON.stringify(editForm),
       });
-      if (!res.ok) throw new Error(JSON.stringify(await res.json()));
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(await res.json(), "Failed to update patient."));
+      }
       const updated = await res.json();
 
       // Bust this patient and the list so both are fresh
@@ -281,6 +337,7 @@ export default function Records() {
       setSelected(updated);
       setPatients(prev => prev.map(p => p.id === updated.id ? updated : p));
       setIsEditing(false);
+      toast.success("Patient changes saved");
     } catch (err) { setEditError(err.message); }
     finally { setSaving(false); }
   }
@@ -302,6 +359,7 @@ export default function Records() {
 
       setPatients(prev => prev.filter(p => p.id !== selected.id));
       handleCloseModal();
+      toast.success("Patient deleted");
     } catch (err) { setEditError(err.message); setConfirmDelete(false); }
     finally { setDeleting(false); }
   }
@@ -310,6 +368,24 @@ export default function Records() {
     { value: "", label: "None" },
     ...staff.map(s => ({ value: s.full_name, label: s.full_name + (s.role === "admin" ? " (Admin)" : "") })),
   ];
+
+  const sortedPatients = useMemo(() => {
+    const sorted = [...patients];
+    sorted.sort((a, b) => {
+      if (sortBy === "name-asc" || sortBy === "name-desc") {
+        const comparison = (a.full_name || "").localeCompare(
+          b.full_name || "",
+          "en",
+          { sensitivity: "base" },
+        );
+        return sortBy === "name-asc" ? comparison : -comparison;
+      }
+
+      const comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      return sortBy === "date-asc" ? comparison : -comparison;
+    });
+    return sorted;
+  }, [patients, sortBy]);
 
   return (
     <div className="flex flex-col gap-4 font-sans">
@@ -320,8 +396,18 @@ export default function Records() {
           placeholder="Search patient, phone, email..."
           value={search}
           onChange={e => setSearch(e.target.value)}
+          maxLength={INPUT_LIMITS.search}
           className="flex-1 min-w-[200px] px-3 py-2 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-white/30 transition-all"
         />
+        <div className="w-full sm:w-44">
+          <CustomSelect
+            name="patient-sort"
+            value={sortBy}
+            options={SORT_OPTIONS}
+            onChange={e => setSortBy(e.target.value)}
+            ariaLabel="Sort patients"
+          />
+        </div>
         <button
           onClick={() => setShowNewTest(true)}
           className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium bg-purple-500/20 border border-purple-500/25 text-white hover:bg-purple-500/30 hover:border-purple-500/40 transition-all hover:cursor-pointer"
@@ -350,7 +436,7 @@ export default function Records() {
               <tr><td colSpan={5} className="text-center py-12 text-white/25 text-sm">Loading…</td></tr>
             ) : patients.length === 0 ? (
               <tr><td colSpan={5} className="text-center py-12 text-white/25 text-sm">No patients found</td></tr>
-            ) : patients.map((p, i) => (
+            ) : sortedPatients.map((p, i) => (
               <tr key={p.id} className={`border-b border-white/5 transition-colors hover:bg-white/5 ${i % 2 === 0 ? "bg-white/[0.02]" : ""}`}>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -487,17 +573,18 @@ export default function Records() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>First name</label>
-                      <input type="text" name="first_name" value={editForm.first_name} onChange={handleEditChange} className={inputClass} />
+                      <input type="text" name="first_name" value={editForm.first_name} onChange={handleEditChange} required maxLength={INPUT_LIMITS.name} autoComplete="given-name" className={inputClass} />
                     </div>
                     <div>
                       <label className={labelClass}>Last name</label>
-                      <input type="text" name="last_name" value={editForm.last_name} onChange={handleEditChange} className={inputClass} />
+                      <input type="text" name="last_name" value={editForm.last_name} onChange={handleEditChange} required maxLength={INPUT_LIMITS.name} autoComplete="family-name" className={inputClass} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>Date of birth</label>
                       <input type="date" name="birth_date" value={editForm.birth_date} onChange={handleEditChange}
+                        max={new Date().toISOString().slice(0, 10)}
                         className={inputClass + " [color-scheme:dark]"} />
                     </div>
                     <div>
@@ -508,11 +595,11 @@ export default function Records() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>Phone</label>
-                      <input type="tel" name="phone" value={editForm.phone} onChange={handleEditChange} placeholder="09XX-XXX-XXXX" className={inputClass} />
+                      <input type="tel" name="phone" value={editForm.phone} onChange={handleEditChange} placeholder="09XXXXXXXXX" maxLength={INPUT_LIMITS.phone} inputMode="numeric" autoComplete="tel" className={inputClass} />
                     </div>
                     <div>
                       <label className={labelClass}>Email</label>
-                      <input type="email" name="email" value={editForm.email} onChange={handleEditChange} placeholder="example@email.com" className={inputClass} />
+                      <input type="email" name="email" value={editForm.email} onChange={handleEditChange} placeholder="name@gmail.com" maxLength={INPUT_LIMITS.email} autoComplete="email" className={inputClass} />
                     </div>
                   </div>
                   <div>
@@ -523,12 +610,12 @@ export default function Records() {
                   <div>
                     <label className={labelClass}>Visual condition</label>
                     <textarea name="visual_condition" value={editForm.visual_condition} onChange={handleEditChange}
-                      rows={3} placeholder="e.g. Myopia, Glaucoma suspect..." className={textareaClass} />
+                      rows={3} maxLength={INPUT_LIMITS.longText} placeholder="e.g. Myopia, Glaucoma suspect..." className={textareaClass} />
                   </div>
                   <div>
                     <label className={labelClass}>Case history</label>
                     <textarea name="case_history" value={editForm.case_history} onChange={handleEditChange}
-                      rows={3} placeholder="e.g. Previous surgeries, past diagnoses..." className={textareaClass} />
+                      rows={3} maxLength={INPUT_LIMITS.longText} placeholder="e.g. Previous surgeries, past diagnoses..." className={textareaClass} />
                   </div>
                 </div>
               </>
@@ -542,7 +629,7 @@ export default function Records() {
                 Cancel
               </button>
               <button onClick={handleSaveEdit} disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm font-medium bg-blue-500/20 border border-blue-500/25 text-blue-400 hover:bg-blue-500/30 transition-all disabled:opacity-50">
+                className="inline-flex min-w-36 items-center justify-center whitespace-nowrap px-5 py-2 rounded-lg text-sm font-medium bg-blue-500/20 border border-blue-500/25 text-blue-400 hover:bg-blue-500/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
                 {saving ? "Saving…" : "Save changes →"}
               </button>
             </div>
@@ -568,17 +655,18 @@ export default function Records() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>First name</label>
-                <input type="text" name="first_name" value={form.first_name} onChange={handleFormChange} placeholder="e.g. Maria" className={inputClass} />
+                <input type="text" name="first_name" value={form.first_name} onChange={handleFormChange} placeholder="e.g. Maria" required maxLength={INPUT_LIMITS.name} autoComplete="given-name" className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>Last name</label>
-                <input type="text" name="last_name" value={form.last_name} onChange={handleFormChange} placeholder="e.g. Santos" className={inputClass} />
+                <input type="text" name="last_name" value={form.last_name} onChange={handleFormChange} placeholder="e.g. Santos" required maxLength={INPUT_LIMITS.name} autoComplete="family-name" className={inputClass} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Date of birth</label>
                 <input type="date" name="birth_date" value={form.birth_date} onChange={handleFormChange}
+                  max={new Date().toISOString().slice(0, 10)}
                   className={inputClass + " [color-scheme:dark]"} />
               </div>
               <div>
@@ -589,11 +677,11 @@ export default function Records() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Phone</label>
-                <input type="tel" name="phone" value={form.phone} onChange={handleFormChange} placeholder="09XX-XXX-XXXX" className={inputClass} />
+                <input type="tel" name="phone" value={form.phone} onChange={handleFormChange} placeholder="09XXXXXXXXX" maxLength={INPUT_LIMITS.phone} inputMode="numeric" autoComplete="tel" className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>Email</label>
-                <input type="email" name="email" value={form.email} onChange={handleFormChange} placeholder="example@email.com" className={inputClass} />
+                <input type="email" name="email" value={form.email} onChange={handleFormChange} placeholder="name@gmail.com" maxLength={INPUT_LIMITS.email} autoComplete="email" className={inputClass} />
               </div>
             </div>
             <div>
@@ -604,24 +692,30 @@ export default function Records() {
             <div>
               <label className={labelClass}>Visual condition</label>
               <textarea name="visual_condition" value={form.visual_condition} onChange={handleFormChange}
-                rows={3} placeholder="e.g. Myopia, Glaucoma suspect, Diabetic retinopathy..." className={textareaClass} />
+                rows={3} maxLength={INPUT_LIMITS.longText} placeholder="e.g. Myopia, Glaucoma suspect, Diabetic retinopathy..." className={textareaClass} />
             </div>
             <div>
               <label className={labelClass}>Case history</label>
               <textarea name="case_history" value={form.case_history} onChange={handleFormChange}
-                rows={3} placeholder="e.g. Previous surgeries, past diagnoses, relevant medical history..." className={textareaClass} />
+                rows={3} maxLength={INPUT_LIMITS.longText} placeholder="e.g. Previous surgeries, past diagnoses, relevant medical history..." className={textareaClass} />
             </div>
           </div>
 
-          <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-white/10 shrink-0">
             <button onClick={handleCloseNewTest}
               className="px-4 py-2 rounded-lg text-sm bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 transition-all">
               Cancel
             </button>
-            <button onClick={handleSaveNewPatient} disabled={submitting}
-              className="px-5 py-2 rounded-lg text-sm font-medium bg-purple-500/20 border border-purple-500/25 text-white hover:bg-purple-500/30 transition-all disabled:opacity-50">
-              {submitting ? "Saving…" : "Save patient →"}
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button onClick={() => handleSaveNewPatient(false)} disabled={submitting}
+                className="inline-flex min-w-32 items-center justify-center whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+                {submitting && submitIntent === "save" ? "Saving…" : "Save patient"}
+              </button>
+              <button onClick={() => handleSaveNewPatient(true)} disabled={submitting}
+                className="inline-flex min-w-40 items-center justify-center whitespace-nowrap px-5 py-2 rounded-lg text-sm font-medium bg-purple-500/20 border border-purple-500/25 text-white hover:bg-purple-500/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+                {submitting && submitIntent === "start" ? "Creating…" : "Save & Start Test →"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}

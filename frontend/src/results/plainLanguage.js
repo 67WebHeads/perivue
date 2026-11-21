@@ -101,7 +101,7 @@ export function summarizeRun(run) {
     const avg = reached.reduce((sum, k) => sum + k.radius, 0) / reached.length
     points.push(
       `Moving dots were noticed on average about ${Math.round(avg)}° from the centre, ` +
-      `which shows how far side vision reaches (the purple line on the map).`
+      `which shows how far side vision reaches (the lavender line on the map).`
     )
     if (reached.length >= 4) {
       const sorted = [...reached].sort((a, b) => a.radius - b.radius)
@@ -176,7 +176,7 @@ export const GLOSSARY = [
   ['Visual field', 'Everything you can see, including at the sides, while looking straight ahead.'],
   ['Flashing (static) dots', 'Dots that blink on in one spot. Each one checks a single place in your side vision.'],
   ['Moving (kinetic) dots', 'Dots that slide in from the edge toward the centre. Where you first notice one marks the edge of your side vision.'],
-  ['Isopter', 'The purple line joining those edge points: the outline of how far your side vision reaches.'],
+  ['Isopter', 'The lavender line joining those edge points: the outline of how far your side vision reaches.'],
   ['Fixation', 'Keeping your eye on the centre cross. Looking away during the test makes the results less accurate.'],
   ['Nasal / temporal', 'Nasal is the side of your vision toward your nose; temporal is the side toward your ear.'],
   ['OD / OS', 'OD means the right eye and OS means the left eye.'],

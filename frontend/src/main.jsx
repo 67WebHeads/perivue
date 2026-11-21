@@ -17,6 +17,7 @@ import TestResults from './pages/general/TestResults.jsx';
 import UserManagement from "./pages/general/UserManagement";
 import Settings from "./pages/general/Settings.jsx";
 import { useAuth } from "./context/AuthContext";
+import { ToastProvider } from "./context/ToastContext";
 
 // ── Admin-only route wrapper ──────────────────────────────────────────────────
 function AdminRoute({ children }) {
@@ -29,40 +30,42 @@ function AdminRoute({ children }) {
 createRoot(document.getElementById("root")).render(
   <BrowserRouter>
     <StrictMode>
-      <AuthProvider>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/complete-profile" element={<CompleteProfile />} />
+      <ToastProvider>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/complete-profile" element={<CompleteProfile />} />
 
-          {/* Protected routes inside Layout */}
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/dashboard"  element={<Dashboard />} />
-            <Route path="/records"    element={<Records />} />
-            <Route path="/test-menu"  element={<TestHome />} />
-            <Route path="/settings"   element={<Settings />} />
+            {/* Protected routes inside Layout */}
             <Route
-              path="/users"
               element={
-                <AdminRoute>
-                  <UserManagement />
-                </AdminRoute>
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
               }
-            />
-          </Route>
+            >
+              <Route path="/dashboard"  element={<Dashboard />} />
+              <Route path="/records"    element={<Records />} />
+              <Route path="/test-menu"  element={<TestHome />} />
+              <Route path="/settings"   element={<Settings />} />
+              <Route
+                path="/users"
+                element={
+                  <AdminRoute>
+                    <UserManagement />
+                  </AdminRoute>
+                }
+              />
+            </Route>
 
-          {/* Fullscreen routes — no layout */}
-          <Route path="/test/canvas"  element={<TestScreen />} />
-          <Route path="/test/results" element={<TestResults />} />
-        </Routes>
-      </AuthProvider>
+            {/* Fullscreen routes — no layout */}
+            <Route path="/test/canvas"  element={<TestScreen />} />
+            <Route path="/test/results" element={<TestResults />} />
+          </Routes>
+        </AuthProvider>
+      </ToastProvider>
     </StrictMode>
   </BrowserRouter>
 );
