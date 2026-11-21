@@ -99,26 +99,6 @@ const CALIBRATION_TARGETS = [
   [0.90, 0.90],
 ]
 
-// How far the gaze may stray from the centre cross before the test pauses, in
-// degrees of visual angle (the grid's own units). The innermost static ring is
-// 10°, so even "relaxed" catches a look at any dot. Saved per laptop.
-const FIXATION_TOLERANCE_KEY = 'perivue_fixation_tolerance_deg'
-const FIXATION_TOLERANCES = [
-  { value: 3, label: 'Strict — 3°' },
-  { value: 5, label: 'Standard — 5°' },
-  { value: 7, label: 'Relaxed — 7°' },
-]
-const DEFAULT_FIXATION_TOLERANCE = 5
-
-// How long a press is held before it is scored, so a glance the tracker
-// confirms just after the press can still throw it out — see handleResponse
-const PRESS_CONFIRM_MS = 350
-
-function readFixationTolerance() {
-  const n = Number(readPref(FIXATION_TOLERANCE_KEY, DEFAULT_FIXATION_TOLERANCE))
-  return FIXATION_TOLERANCES.some(t => t.value === n) ? n : DEFAULT_FIXATION_TOLERANCE
-}
-
 function readInitialOpacity() {
   const n = Number(readPref(TANGENT_OPACITY_KEY, 100))
   return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 100
@@ -506,12 +486,6 @@ export default function TestScreen() {
   // interrupted point is then repeated, not recorded.
   const [fixationPaused, setFixationPaused] = useState(false)
   const fixationPausedRef = useRef(false)
-  // True only while trials are running (not before start, not while the
-  // clinician has paused) — the in-page tracker's instant verdict checks it
-  const trialsRunningRef = useRef(false)
-  const pauseForFixationRef = useRef(null)
-  const [fixationTolerance, setFixationTolerance] = useState(readFixationTolerance)
-  const fixationToleranceRef = useRef(fixationTolerance)
 
   // ── Eye tracking toggle + tracker health ──────────────────────────────────
   // Persisted so the clinician doesn't have to re-disable it every session
@@ -691,13 +665,6 @@ export default function TestScreen() {
         setBrowserStatus(status)
         sendStatus()
       },
-      // Decided in this page from the calibrated gaze, so a glance pauses the
-      // test straight away instead of after a trip through the backend
-      onFixationChange: (fixating) => {
-        isFixatingRef.current = fixating
-        setIsFixating(fixating)
-        if (!fixating) pauseForFixationRef.current?.()
-      },
       // Skip drawing the preview entirely when nobody is watching
       getPreviewCanvas: () => (monitorAlive() ? preview : null),
     })
@@ -816,56 +783,11 @@ export default function TestScreen() {
     }
   }, [])
 
-  // ── Fixation pause trigger ────────────────────────────────────────────────
-  // Halts the run on the current point (it is repeated on resume). Shared by
-  // the in-page tracker's instant verdict, the state poll (Python tracker),
-  // and the checks below. Returns true if it paused.
-  useEffect(() => {
-    trialsRunningRef.current = started && !paused && !overlay && !completed
-  }, [started, paused, overlay, completed])
-
-  useEffect(() => {
-    pauseForFixationRef.current = () => {
-      if (!eyeTrackingRef.current || calibratingRef.current) return false
-      if (fixationPausedRef.current || !trialsRunningRef.current) return false
-      fixationPausedRef.current = true
-      setFixationPaused(true)
-      endTrial()
-      return true
-    }
-  }, [endTrial])
-
-  // Before presenting a point: if the patient is still looking away (e.g. the
-  // clinician resumed too early), pause again instead of showing the dot
-  function haltIfLookingAway() {
-    const tracker = browserTrackerRef.current
-    if (!tracker || tracker.isFixating()) return false
-    return pauseForFixationRef.current?.() ?? false
-  }
-
-  // One degree of the grid as fractions of the canvas width / height (the
-  // space the calibration dots are placed in)
-  function screenGeometry() {
-    const canvas = canvasRef.current
-    const scale = gridMeta.current?.scale
-    if (!canvas?.width || !canvas?.height || !scale) return null
-    return { degX: scale / canvas.width, degY: scale / canvas.height }
-  }
-
-  function handleFixationToleranceChange(e) {
-    const next = Number(e.target.value)
-    setFixationTolerance(next)
-    fixationToleranceRef.current = next
-    savePref(FIXATION_TOLERANCE_KEY, next)
-    browserTrackerRef.current?.setTolerance(next)
-  }
-
   // ── Static trial ──────────────────────────────────────────────────────────
   const runStaticTrial = useCallback((point) => {
     const canvas = canvasRef.current
     if (!canvas) return
     if (fixationPausedRef.current) return  // resume will re-run this point
-    if (haltIfLookingAway()) return
 
     trialActiveRef.current = true
     trialStartRef.current  = null               // set after dot appears
@@ -895,7 +817,6 @@ export default function TestScreen() {
     const canvas = canvasRef.current
     if (!canvas) return
     if (fixationPausedRef.current) return  // resume will re-run this point
-    if (haltIfLookingAway()) return
 
     trialActiveRef.current = true
     trialStartRef.current  = performance.now()
@@ -948,19 +869,6 @@ export default function TestScreen() {
     if (!trialActiveRef.current) return
 
     e.preventDefault()
-
-    // A press while (or just after) looking at the dot doesn't measure the
-    // peripheral field — pause and repeat this point instead of scoring it
-    const tracker = browserTrackerRef.current
-    if (
-      tracker &&
-      trialStartRef.current &&
-      tracker.lookedAwaySince(trialStartRef.current) &&
-      pauseForFixationRef.current?.()
-    ) {
-      return
-    }
-
     const responseTime = trialStartRef.current
       ? Math.round(performance.now() - trialStartRef.current)
       : null
@@ -977,17 +885,6 @@ export default function TestScreen() {
       responseWindowRef.current = null
     }
     if (canvasRef.current) gridMeta.current = drawGrid(canvasRef.current, tangentScreenOpacityRef.current / 100)
-
-    // The tracker smooths out camera shake, so it confirms a glance ~0.35s
-    // after the eyes move — a quick patient can press before that. Hold the
-    // result briefly and drop it if a glance turns up in the meantime (the
-    // fixation pause then repeats this point).
-    if (tracker?.hasCalibration() && eyeTrackingRef.current) {
-      const startedAt = trialStartRef.current
-      await new Promise(r => setTimeout(r, PRESS_CONFIRM_MS))
-      if (fixationPausedRef.current || !trialsRunningRef.current) return
-      if (startedAt && tracker.lookedAwaySince(startedAt) && pauseForFixationRef.current?.()) return
-    }
 
     if (point?.point_type === 'kinetic' && pos) {
       recordTrial(
@@ -1029,11 +926,8 @@ export default function TestScreen() {
         if (!res.ok) return
         const state = await res.json()
 
-        // The in-page tracker reports its verdict directly (onFixationChange)
-        if (!browserTrackerRef.current) {
-          setIsFixating(state.is_fixating)
-          isFixatingRef.current = state.is_fixating
-        }
+        setIsFixating(state.is_fixating)
+        isFixatingRef.current = state.is_fixating
 
         if (state.gaze_x != null && state.gaze_y != null) {
           gazePosRef.current = { x: state.gaze_x, y: state.gaze_y }
@@ -1056,10 +950,16 @@ export default function TestScreen() {
           setPaused(false)
 
           // Fixation lost mid-test → halt on the current point until the
-          // clinician re-centers the patient and presses to continue. The
-          // in-page tracker does this itself, instantly (onFixationChange)
-          if (!BROWSER_TRACKING && !state.is_fixating) {
-            pauseForFixationRef.current?.()
+          // clinician re-centers the patient and presses to continue
+          if (
+            eyeTrackingRef.current &&
+            !state.is_fixating &&
+            !fixationPausedRef.current &&
+            !calibratingRef.current
+          ) {
+            fixationPausedRef.current = true
+            setFixationPaused(true)
+            endTrial()
           }
         }
       } catch (err) {
@@ -1068,9 +968,8 @@ export default function TestScreen() {
     }
 
     poll()
-    // The Python tracker's verdict only arrives through here — poll it fast.
-    // The in-page tracker pauses by itself, so this is just status there.
-    const interval = setInterval(poll, BROWSER_TRACKING ? 1000 : 250)
+    // 500ms so a fixation loss halts the test quickly (was 1s)
+    const interval = setInterval(poll, 500)
     return () => clearInterval(interval)
   }, [started, runId, authFetch, endTrial])
 
@@ -1308,18 +1207,8 @@ export default function TestScreen() {
   // should start uncalibrated.
   async function runCalibration() {
     calibratingRef.current = true
-    browserTrackerRef.current?.setCalibrating(true)
     let animId = null
     try {
-      // The Python tracker learns this from the server: clearing the old
-      // calibration marks the run as calibrating, which holds its centre
-      // still while the patient stares at the corner dots
-      if (!browserTrackerRef.current) {
-        await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
-          method: 'DELETE',
-        }).catch(() => {})
-      }
-
       const points = []
 
       for (let i = 0; i < CALIBRATION_TARGETS.length; i++) {
@@ -1364,14 +1253,9 @@ export default function TestScreen() {
       }
 
       setCalibStep(null)
-      const geometry = screenGeometry()
-      const tol = fixationToleranceRef.current
-      const limit = geometry && { x: tol * geometry.degX, y: tol * geometry.degY }
       const res = await authFetch(`${API_BASE_URL}/api/visual-tests/runs/${runId}/calibrate/`, {
         method: 'POST',
-        // window: the fixation tolerance for the Python tracker's verdict,
-        // which the server decides
-        body: JSON.stringify(limit ? { points, window: limit } : { points }),
+        body: JSON.stringify({ points }),
       })
       if (!res.ok) {
         console.error('Failed to save calibration:', res.status)
@@ -1394,17 +1278,12 @@ export default function TestScreen() {
         await new Promise(r => setTimeout(r, 4000))
         return false
       }
-      // The in-page tracker decides fixation itself from here on
-      if (browserTrackerRef.current && geometry) {
-        browserTrackerRef.current.setCalibration(points, { ...geometry, toleranceDeg: tol })
-      }
       return true
     } catch (err) {
       console.error('Calibration error:', err)
       return false
     } finally {
       if (animId) cancelAnimationFrame(animId)
-      browserTrackerRef.current?.setCalibrating(false)
       calibratingRef.current = false
       setCalibStep(null)
       setCalibMessage('')
@@ -1806,9 +1685,9 @@ export default function TestScreen() {
       {fixationPaused && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center
           gap-3 bg-black/70 backdrop-blur-sm pointer-events-none">
-          <p className="text-red-400 text-lg font-medium">Test paused — eyes moved off the centre</p>
-          <p className="text-white/70 text-base">
-            Please look only at the centre cross. Don&apos;t look at the dots.
+          <p className="text-red-400 text-lg font-medium">Fixation lost</p>
+          <p className="text-white/50 text-sm">
+            Have the patient look at the centre cross again
           </p>
           <p className="text-white/30 text-xs mt-1">
             Press Space or click to continue — this point will be repeated
@@ -2069,28 +1948,6 @@ export default function TestScreen() {
               </div>
               <p className="mt-2 text-[11px] text-white/30">
                 Applies from the next dot. The colour is saved with each result.
-              </p>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-center justify-between gap-4">
-                <label htmlFor="fixation-tolerance" className="text-xs font-medium text-white/65">
-                  Fixation tolerance
-                </label>
-                <select
-                  id="fixation-tolerance"
-                  value={fixationTolerance}
-                  onChange={handleFixationToleranceChange}
-                  className="rounded-lg border border-white/15 bg-[#15152a] px-2 py-1 text-xs text-white/80"
-                >
-                  {FIXATION_TOLERANCES.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-              <p className="mt-2 text-[11px] text-white/30">
-                How far the patient&apos;s gaze may leave the centre cross before the test
-                pauses. Use Relaxed if it pauses while they are holding still.
               </p>
             </div>
 
