@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import splash_art_perivue from "../../assets/splash_art_perivue.png";
 import API_BASE_URL from "../../config/api";
 import { useAuth } from "../../context/AuthContext";
+import { INPUT_LIMITS, sanitizeName, validateName } from "../../utils/validation";
 
 const ROLES = [
   { value: "admin",     label: "Admin",     desc: "Full access to all clinic features" },
@@ -30,8 +31,9 @@ export default function CompleteProfile() {
   async function handleSubmit() {
     setError("");
 
-    if (!fullName.trim()) {
-      setError("Please enter your full name.");
+    const nameError = validateName(fullName, "Full name", INPUT_LIMITS.fullName);
+    if (nameError) {
+      setError(nameError);
       return;
     }
     if (!role) {
@@ -98,8 +100,11 @@ export default function CompleteProfile() {
           <input
             type="text"
             value={fullName}
-            onChange={e => setFullName(e.target.value)}
+            onChange={e => setFullName(sanitizeName(e.target.value, INPUT_LIMITS.fullName))}
             placeholder="e.g. Maria Santos"
+            required
+            maxLength={INPUT_LIMITS.fullName}
+            autoComplete="name"
             className={inputClass}
           />
           <p className="text-white/25 text-xs font-mono">

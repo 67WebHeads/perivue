@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "../../context/AuthContext"
+import { useToast } from "../../context/ToastContext"
 import API_BASE_URL from "../../config/api"
+import {
+  apiErrorMessage,
+  INPUT_LIMITS,
+  sanitizeName,
+  validateCeuEmail,
+  validateName,
+} from "../../utils/validation"
 
 const ROLE_OPTIONS = [
   { value: "admin",     label: "Admin",     desc: "Full access including user management" },
@@ -67,6 +75,7 @@ function RoleSelect({ value, onChange }) {
 
 export default function UserManagement() {
   const { authFetch, user: currentUser } = useAuth()
+  const toast = useToast()
 
   const [users,     setUsers]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -112,6 +121,12 @@ export default function UserManagement() {
 
   // ── Create user ───────────────────────────────────────────────────────────
   async function handleCreate() {
+    const nameError = validateName(createForm.full_name, "Full name", INPUT_LIMITS.fullName)
+    const emailError = validateCeuEmail(createForm.email)
+    if (nameError || emailError) {
+      setCreateErr(nameError || emailError)
+      return
+    }
     setCreating(true)
     setCreateErr(null)
     try {
@@ -121,11 +136,12 @@ export default function UserManagement() {
       })
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || "Failed to create user")
+        throw new Error(apiErrorMessage(data, "Failed to create user"))
       }
       await fetchUsers()
       setShowCreate(false)
       setCreateForm({ email: "", full_name: "", role: "clinician" })
+      toast.success("User account created")
     } catch (err) {
       setCreateErr(err.message)
     } finally {
@@ -141,6 +157,11 @@ export default function UserManagement() {
   }
 
   async function handleSave() {
+    const nameError = validateName(editForm.full_name, "Full name", INPUT_LIMITS.fullName)
+    if (nameError) {
+      setSaveErr(nameError)
+      return
+    }
     setSaving(true)
     setSaveErr(null)
     try {
@@ -150,10 +171,11 @@ export default function UserManagement() {
       })
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || "Failed to save")
+        throw new Error(apiErrorMessage(data, "Failed to save"))
       }
       await fetchUsers()
       setEditTarget(null)
+      toast.success("User changes saved")
     } catch (err) {
       setSaveErr(err.message)
     } finally {
@@ -165,11 +187,15 @@ export default function UserManagement() {
   async function handleDelete() {
     setDeleting(true)
     try {
-      await authFetch(`${API_BASE_URL}/api/users/manage/${deleteTarget.id}/`, {
+      const res = await authFetch(`${API_BASE_URL}/api/users/manage/${deleteTarget.id}/`, {
         method: "DELETE",
       })
+      if (!res.ok) throw new Error("Failed to delete user")
       await fetchUsers()
       setDeleteTarget(null)
+      toast.success("User deleted")
+    } catch (err) {
+      toast.error(err.message)
     } finally {
       setDeleting(false)
     }
@@ -194,6 +220,7 @@ export default function UserManagement() {
           placeholder="Search users..."
           value={search}
           onChange={e => setSearch(e.target.value)}
+          maxLength={INPUT_LIMITS.search}
           className="flex-1 min-w-[200px] px-3 py-2 rounded-lg text-sm
             bg-white/5 border border-white/10 text-white placeholder-white/30
             focus:outline-none focus:border-white/30 transition-all"
@@ -329,6 +356,9 @@ export default function UserManagement() {
                 placeholder="name@ceu.edu.ph"
                 value={createForm.email}
                 onChange={e => setCreateForm(p => ({ ...p, email: e.target.value }))}
+                required
+                maxLength={INPUT_LIMITS.email}
+                autoComplete="email"
                 className={inputClass}
               />
             </div>
@@ -338,7 +368,13 @@ export default function UserManagement() {
                 type="text"
                 placeholder="e.g. Dr. Maria Santos"
                 value={createForm.full_name}
-                onChange={e => setCreateForm(p => ({ ...p, full_name: e.target.value }))}
+                onChange={e => setCreateForm(p => ({
+                  ...p,
+                  full_name: sanitizeName(e.target.value, INPUT_LIMITS.fullName),
+                }))}
+                required
+                maxLength={INPUT_LIMITS.fullName}
+                autoComplete="name"
                 className={inputClass}
               />
             </div>
@@ -355,9 +391,9 @@ export default function UserManagement() {
               Cancel
             </button>
             <button onClick={handleCreate} disabled={creating}
-              className="px-5 py-2 rounded-lg text-sm font-medium
+              className="inline-flex min-w-36 items-center justify-center whitespace-nowrap px-5 py-2 rounded-lg text-sm font-medium
                 bg-purple-500/20 border border-purple-500/25 text-white
-                hover:bg-purple-500/30 transition-all disabled:opacity-50">
+                hover:bg-purple-500/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
               {creating ? "Creating…" : "Create user →"}
             </button>
           </div>
@@ -387,7 +423,13 @@ export default function UserManagement() {
               <input
                 type="text"
                 value={editForm.full_name}
-                onChange={e => setEditForm(p => ({ ...p, full_name: e.target.value }))}
+                onChange={e => setEditForm(p => ({
+                  ...p,
+                  full_name: sanitizeName(e.target.value, INPUT_LIMITS.fullName),
+                }))}
+                required
+                maxLength={INPUT_LIMITS.fullName}
+                autoComplete="name"
                 className={inputClass}
               />
             </div>
@@ -435,9 +477,9 @@ export default function UserManagement() {
               Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="px-5 py-2 rounded-lg text-sm font-medium
+              className="inline-flex min-w-36 items-center justify-center whitespace-nowrap px-5 py-2 rounded-lg text-sm font-medium
                 bg-blue-500/20 border border-blue-500/25 text-blue-400
-                hover:bg-blue-500/30 transition-all disabled:opacity-50">
+                hover:bg-blue-500/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
               {saving ? "Saving…" : "Save changes →"}
             </button>
           </div>

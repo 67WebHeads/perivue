@@ -9,7 +9,7 @@ function StatCard({ title, value, period, trend, icon, loading }) {
   const trendLabel = trend != null ? `${trend > 0 ? "+" : ""}${trend}%` : null;
 
   return (
-    <div className="flex flex-col gap-3 rounded-3xl border border-zinc-400/10 shadow-sm bg-white/5 p-5">
+    <div className="flex h-full flex-col gap-3 rounded-3xl border border-zinc-400/10 shadow-sm bg-white/5 p-5">
       <div className="flex items-start justify-between">
         <p className="text-sm text-base-content/60">{title}</p>
         <span className="text-base-content/40">{icon}</span>
@@ -131,7 +131,7 @@ function QuickActions() {
   return (
     <div className="flex flex-col gap-3 rounded-3xl border border-zinc-400/10 bg-white/5 p-5">
       <p className="text-sm font-medium">Quick Actions</p>
-      <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {actions.map((a) => (
           <button
             key={a.label}
@@ -144,6 +144,19 @@ function QuickActions() {
               <span className="text-xs text-base-content/40">{a.desc}</span>
             </div>
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Statistics({ cards, loading }) {
+  return (
+    <div className="flex self-start flex-col gap-3 rounded-3xl border border-zinc-400/10 bg-white/5 p-5">
+      <p className="text-sm font-medium">Statistics</p>
+      <div className="grid auto-rows-fr grid-cols-1 gap-3 min-[440px]:grid-cols-2 sm:grid-cols-1 lg:grid-cols-2">
+        {cards.map((card) => (
+          <StatCard key={card.key} {...card} loading={loading} />
         ))}
       </div>
     </div>
@@ -234,17 +247,13 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 shrink-0">
-        {cards.map((card) => (
-          <StatCard key={card.key} {...card} loading={statsLoading} />
-        ))}
-      </div>
+      <QuickActions />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 flex-1 min-h-0">
         <div className="sm:col-span-2 min-h-0">
           <RecentSessions sessions={sessions} loading={sessionsLoading} />
         </div>
-        <QuickActions />
+        <Statistics cards={cards} loading={statsLoading} />
       </div>
     </div>
   );

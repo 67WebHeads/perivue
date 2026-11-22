@@ -1,11 +1,31 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import API_BASE_URL from '../../config/api'
 import { invalidatePrefix } from '../../cache/Apicache'
 import { summarizeRun, GLOSSARY } from '../../results/plainLanguage'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas-pro'
+
+const RESULT_COLORS = {
+  green: {
+    text: 'text-emerald-300',
+    bar: 'bg-emerald-400',
+  },
+  amber: {
+    text: 'text-amber-300',
+    bar: 'bg-amber-400',
+  },
+  red: {
+    text: 'text-rose-300',
+    bar: 'bg-rose-400',
+  },
+  lavender: {
+    text: 'text-lavender',
+    bar: 'bg-lavender',
+  },
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,8 +100,8 @@ function FieldMap({ eye, staticResults, kineticResults }) {
       {boundaryPath && (
         <path
           d={boundaryPath}
-          fill="#a855f718"
-          stroke="#a855f7"
+          fill="#BCA8E026"
+          stroke="#BCA8E0"
           strokeWidth={1.5}
           strokeLinejoin="round"
         />
@@ -91,11 +111,11 @@ function FieldMap({ eye, staticResults, kineticResults }) {
       {staticResults.map((r, i) => {
         const { x, y } = cartesianToSvg(r.x_deg, r.y_deg, cx, cy, scale)
         return r.result === 'seen' ? (
-          <circle key={i} cx={x} cy={y} r={4} fill="#22c55e" opacity={0.85} />
+          <circle key={i} cx={x} cy={y} r={4} fill="#34d399" opacity={0.9} />
         ) : (
           <g key={i}>
-            <line x1={x-3.5} y1={y-3.5} x2={x+3.5} y2={y+3.5} stroke="#ef4444" strokeWidth={1.5} />
-            <line x1={x+3.5} y1={y-3.5} x2={x-3.5} y2={y+3.5} stroke="#ef4444" strokeWidth={1.5} />
+            <line x1={x-3.5} y1={y-3.5} x2={x+3.5} y2={y+3.5} stroke="#fb7185" strokeWidth={1.5} />
+            <line x1={x+3.5} y1={y-3.5} x2={x-3.5} y2={y+3.5} stroke="#fb7185" strokeWidth={1.5} />
           </g>
         )
       })}
@@ -113,18 +133,11 @@ function FieldMap({ eye, staticResults, kineticResults }) {
 // ─── Metric Card ──────────────────────────────────────────────────────────────
 
 function MetricCard({ label, value, unit, sub, color }) {
-  const colors = {
-    green:  'text-green-400',
-    yellow: 'text-yellow-400',
-    blue:   'text-blue-400',
-    purple: 'text-purple-400',
-    red:    'text-red-400',
-  }
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-2 pb-3">
+    <div className="bg-dark/70 border border-outline/40 rounded-xl p-4 flex flex-col gap-2 pb-3">
       <span className="text-[10px] font-semibold text-white/35 uppercase tracking-widest">{label}</span>
       <div className="flex items-baseline gap-1.5">
-        <span className={`text-5xl font-bold leading-none ${colors[color] ?? 'text-white'}`}>
+        <span className={`text-5xl font-bold leading-none ${RESULT_COLORS[color]?.text ?? 'text-white'}`}>
           {value ?? '—'}
         </span>
         {value != null && unit && (
@@ -139,17 +152,17 @@ function MetricCard({ label, value, unit, sub, color }) {
 // ─── Plain-language summary ───────────────────────────────────────────────────
 
 const TONE_STYLES = {
-  good:       { chip: 'bg-green-500/15 border-green-500/30 text-green-300',    label: 'Mostly seen' },
-  mixed:      { chip: 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300', label: 'Some dots missed' },
-  concern:    { chip: 'bg-red-500/15 border-red-500/30 text-red-300',          label: 'Many dots missed' },
-  unreliable: { chip: 'bg-orange-500/15 border-orange-500/30 text-orange-300', label: 'May need a repeat' },
+  good:       { chip: 'bg-emerald-400/10 border-emerald-400/30 text-emerald-300', label: 'Mostly seen' },
+  mixed:      { chip: 'bg-amber-400/10 border-amber-400/30 text-amber-300',       label: 'Some dots missed' },
+  concern:    { chip: 'bg-rose-400/10 border-rose-400/30 text-rose-300',          label: 'Many dots missed' },
+  unreliable: { chip: 'bg-amber-400/10 border-amber-400/30 text-amber-300',       label: 'May need a repeat' },
 }
 
 function PlainSummary({ run }) {
   const summary = summarizeRun(run)
   const tone = TONE_STYLES[summary.tone]
   return (
-    <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
+    <div className="bg-dark/70 border border-outline/40 rounded-2xl p-5 flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-semibold">What these results mean</span>
         <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${tone.chip}`}>
@@ -166,7 +179,7 @@ function PlainSummary({ run }) {
 
 function Glossary() {
   return (
-    <details className="bg-white/5 border border-white/10 rounded-2xl p-5 group">
+    <details className="bg-dark/70 border border-outline/40 rounded-2xl p-5 group">
       <summary className="cursor-pointer text-sm font-semibold list-none flex items-center justify-between">
         Words used in this report
         <span className="text-white/30 text-xs group-open:hidden">Show</span>
@@ -190,9 +203,9 @@ function RunPanel({ run }) {
   const m = run.metrics
 
   const detectionColor = m.detection_accuracy >= 80 ? 'green'
-    : m.detection_accuracy >= 60 ? 'yellow' : 'red'
+    : m.detection_accuracy >= 60 ? 'amber' : 'red'
   const reliabilityColor = m.reliability >= 85 ? 'green'
-    : m.reliability >= 70 ? 'yellow' : 'red'
+    : m.reliability >= 70 ? 'amber' : 'red'
 
   // Duration
   let duration = null
@@ -208,7 +221,7 @@ function RunPanel({ run }) {
   return (
     <div className="flex flex-col gap-5">
       <PlainSummary run={run} />
-      <div className="flex gap-4 md:flex-row flex-col items-center  justify-center bg-black/40 rounded-2xl border border-white/10 p-4">
+      <div className="flex gap-4 md:flex-row flex-col items-center justify-center bg-dark/60 rounded-2xl border border-outline/40 p-4">
         <div className="flex flex-col items-center gap-3">
           <FieldMap
             eye={run.eye}
@@ -217,20 +230,20 @@ function RunPanel({ run }) {
           />
           <div className="flex items-center gap-4 text-xs text-white/40">
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
               Seen
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 inline-block relative">
                 <svg width="10" height="10" viewBox="0 0 10 10">
-                  <line x1="0" y1="0" x2="10" y2="10" stroke="#ef4444" strokeWidth="1.5"/>
-                  <line x1="10" y1="0" x2="0" y2="10" stroke="#ef4444" strokeWidth="1.5"/>
+                  <line x1="0" y1="0" x2="10" y2="10" stroke="#fb7185" strokeWidth="1.5"/>
+                  <line x1="10" y1="0" x2="0" y2="10" stroke="#fb7185" strokeWidth="1.5"/>
                 </svg>
               </span>
               Not seen
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-5 h-0.5 bg-purple-400 inline-block" />
+              <span className="w-5 h-0.5 bg-lavender inline-block" />
               Edge of side vision (isopter)
             </span>
           </div>
@@ -255,14 +268,14 @@ function RunPanel({ run }) {
               sub={m.avg_reaction_time != null
                 ? `About ${(m.avg_reaction_time / 1000).toFixed(1)} s from dot to button press`
                 : 'Time from dot to button press'}
-              color="yellow"
+              color="lavender"
             />
             <MetricCard
               label="Kinetic Boundary"
               value={m.kinetic_boundary_points}
               unit={`/ ${m.kinetic_total}`}
               sub="Moving dots noticed before reaching the centre"
-              color="purple"
+              color="lavender"
             />
             <MetricCard
               label="Test Reliability"
@@ -283,7 +296,7 @@ function RunPanel({ run }) {
                   <span>{m.detection_accuracy}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full bg-green-500 transition-all"
+                  <div className={`h-full rounded-full transition-all ${RESULT_COLORS[detectionColor].bar}`}
                     style={{ width: `${m.detection_accuracy}%` }} />
                 </div>
               </div>
@@ -293,7 +306,7 @@ function RunPanel({ run }) {
                   <span>{m.kinetic_total > 0 ? Math.round((m.kinetic_boundary_points / m.kinetic_total) * 100) : 0}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full bg-purple-500 transition-all"
+                  <div className="h-full rounded-full bg-lavender transition-all"
                     style={{ width: `${m.kinetic_total > 0 ? (m.kinetic_boundary_points / m.kinetic_total) * 100 : 0}%` }} />
                 </div>
               </div>
@@ -303,7 +316,7 @@ function RunPanel({ run }) {
                   <span>{m.reliability}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full bg-purple-400 transition-all"
+                  <div className={`h-full rounded-full transition-all ${RESULT_COLORS[reliabilityColor].bar}`}
                     style={{ width: `${m.reliability}%` }} />
                 </div>
               </div>
@@ -379,8 +392,8 @@ function PrintableFieldMap({ eye, staticResults, kineticResults }) {
       {boundaryPath && (
         <path
           d={boundaryPath}
-          fill="rgba(120, 80, 200, 0.10)"
-          stroke="#5b2da3"
+          fill="rgba(188, 168, 224, 0.18)"
+          stroke="#2D4066"
           strokeWidth={1.5}
           strokeLinejoin="round"
         />
@@ -413,7 +426,7 @@ function PrintableSummary({ run }) {
     <div style={{
       marginTop: 12, padding: '10px 0', background: '#ffffff',
     }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#5b2da3', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#2D4066', textTransform: 'uppercase', letterSpacing: 0.8 }}>
         What this means
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: '#111', margin: '4px 0 6px' }}>
@@ -439,7 +452,7 @@ function PrintableReport({ session, patient, runs }) {
   const valueStyle = { fontSize: 12, color: '#111', fontWeight: 500 }
   const rowStyle = { display: 'flex', flexDirection: 'column', gap: 2 }
   const sectionTitle = {
-    fontSize: 11, fontWeight: 700, color: '#5b2da3',
+    fontSize: 11, fontWeight: 700, color: '#2D4066',
     textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8,
     paddingBottom: 4, borderBottom: '1px solid #ddd',
   }
@@ -457,12 +470,12 @@ function PrintableReport({ session, patient, runs }) {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        borderBottom: '2px solid #5b2da3',
+        borderBottom: '2px solid #2D4066',
         paddingBottom: 12,
         marginBottom: 20,
       }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#5b2da3', letterSpacing: 1 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#2D4066', letterSpacing: 1 }}>
             CEU EYE CLINIC
           </div>
           <div style={{ fontSize: 10, color: '#555' }}>
@@ -598,7 +611,7 @@ function PrintableReport({ session, patient, runs }) {
                 <div style={{ marginTop: 10, fontSize: 9, color: '#666', display: 'flex', gap: 14 }}>
                   <span>● Seen (green)</span>
                   <span>✕ Not seen (red)</span>
-                  <span>― Edge of side vision / isopter (purple)</span>
+                  <span>― Edge of side vision / isopter (lavender)</span>
                 </div>
               </div>
             </div>
@@ -660,6 +673,7 @@ function PrintableReport({ session, patient, runs }) {
 // ─── Notes panel ──────────────────────────────────────────────────────────────
 
 function NotesPanel({ session, authFetch, onSaved }) {
+  const toast = useToast()
   const [examinerNotes, setExaminerNotes] = useState(session.examiner_notes || '')
   const [patientNotes,  setPatientNotes]  = useState(session.patient_notes || '')
   const [saving, setSaving] = useState(false)
@@ -687,7 +701,8 @@ function NotesPanel({ session, authFetch, onSaved }) {
       setExaminerNotes(updated.examiner_notes || '')
       setPatientNotes(updated.patient_notes || '')
       onSaved({ examiner_notes: updated.examiner_notes, patient_notes: updated.patient_notes })
-      setStatus({ type: 'success', msg: 'Notes saved' })
+      setStatus(null)
+      toast.success('Notes saved')
     } catch (err) {
       setStatus({ type: 'error', msg: err.message })
     } finally {
@@ -713,7 +728,7 @@ function NotesPanel({ session, authFetch, onSaved }) {
   ]
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
+    <div className="bg-dark/70 border border-outline/40 rounded-2xl p-5 flex flex-col gap-4">
       <span className="text-sm font-semibold">Notes</span>
 
       {fields.map(f => (
@@ -727,15 +742,15 @@ function NotesPanel({ session, authFetch, onSaved }) {
             rows={3}
             value={f.value}
             onChange={e => { f.onChange(e.target.value); setStatus(null) }}
-            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80
-              focus:border-purple-500/50 focus:outline-none resize-y"
+            className="bg-white/5 border border-outline/50 rounded-lg px-3 py-2 text-sm text-white/80
+              focus:border-lavender/60 focus:outline-none resize-y"
           />
         </label>
       ))}
 
       <div className="flex items-center justify-end gap-3">
         {status && (
-          <p className={`text-xs ${status.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+          <p className={`text-xs ${status.type === 'success' ? 'text-emerald-300' : 'text-rose-300'}`}>
             {status.msg}
           </p>
         )}
@@ -743,7 +758,7 @@ function NotesPanel({ session, authFetch, onSaved }) {
           type="button"
           onClick={handleSave}
           disabled={!dirty || saving}
-          className="text-xs px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white
+          className="inline-flex min-w-24 items-center justify-center whitespace-nowrap text-xs px-4 py-2 rounded-lg border border-lavender/20 bg-icons hover:bg-outline text-white
             transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {saving ? 'Saving…' : 'Save notes'}
@@ -759,6 +774,7 @@ export default function TestResults() {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('run_id')
   const { authFetch }   = useAuth()
+  const toast = useToast()
 
   const [data,      setData]      = useState(null)
   const [loading,   setLoading]   = useState(true)
@@ -831,12 +847,13 @@ export default function TestResults() {
       setExporting(true)
       const { pdf, filename } = await buildPdf()
       pdf.save(filename)
+      toast.success('PDF report downloaded')
     } catch (e) {
-      alert(`Failed to generate PDF: ${e.message}`)
+      toast.error(`Failed to generate PDF: ${e.message}`)
     } finally {
       setExporting(false)
     }
-  }, [buildPdf])
+  }, [buildPdf, toast])
 
   const openEmailModal = useCallback(() => {
     if (!data) return
@@ -896,13 +913,15 @@ export default function TestResults() {
       )
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Failed to send email')
-      setEmailStatus({ type: 'success', msg: `Email sent to ${json.sent_to}` })
+      setEmailStatus(null)
+      setEmailOpen(false)
+      toast.success(`Email sent to ${json.sent_to}`)
     } catch (e) {
       setEmailStatus({ type: 'error', msg: e.message })
     } finally {
       setEmailSending(false)
     }
-  }, [emailForm, buildPdf, authFetch, data])
+  }, [emailForm, buildPdf, authFetch, data, toast])
 
   const fetchResults = useCallback(async () => {
     const sessionId = searchParams.get('session_id')
@@ -954,7 +973,7 @@ export default function TestResults() {
   if (error) {
     return (
       <div className="min-h-screen bg-[#0d0d1a] flex flex-col items-center justify-center gap-4">
-        <p className="text-red-400 text-sm">{error}</p>
+        <p className="text-rose-300 text-sm">{error}</p>
         <Link to="/records" className="text-white/40 text-xs hover:text-white transition-colors">
           ← Back to test menu
         </Link>
@@ -971,7 +990,7 @@ export default function TestResults() {
     <div className="relative min-h-screen bg-[#0d0d1a] text-white overflow-x-hidden font-sans">
 
       {/* Top bar */}
-      <div className="sticky top-0 z-10 bg-[#0d0d1a] border-b border-white/10 px-6 py-4 flex items-center gap-4">
+      <div className="sticky top-0 z-10 bg-[#0d0d1a] border-b border-outline/40 px-6 py-4 flex items-center gap-4">
         <Link to="/records" className="text-white/40 hover:text-white transition-colors">
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -987,14 +1006,14 @@ export default function TestResults() {
           type="button"
           onClick={handleDownloadPdf}
           disabled={exporting}
-          className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors disabled:opacity-40"
+          className="text-xs px-3 py-1.5 rounded-lg bg-dark/70 border border-outline/40 hover:border-lavender/30 hover:bg-dark transition-colors disabled:opacity-40"
         >
           {exporting ? 'Generating…' : 'Download PDF'}
         </button>
         <button
           type="button"
           onClick={openEmailModal}
-          className="text-xs px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+          className="text-xs px-3 py-1.5 rounded-lg border border-lavender/20 bg-icons hover:bg-outline text-white transition-colors"
         >
           Email Patient
         </button>
@@ -1002,10 +1021,10 @@ export default function TestResults() {
 
       <div className="max-w-3xl mx-auto px-6 py-8 flex flex-col gap-8">
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
+        <div className="bg-dark/70 border border-outline/40 rounded-2xl p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
-              viewBox="0 0 24 24" className="text-purple-400">
+              viewBox="0 0 24 24" className="text-lavender">
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
             </svg>
@@ -1030,15 +1049,15 @@ export default function TestResults() {
         </div>
 
         {runs.length > 1 && (
-          <div className="flex gap-2 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
+          <div className="flex gap-2 bg-dark/70 border border-outline/40 rounded-xl p-1 w-fit">
             {runs.map(r => (
               <button
                 key={r.eye}
                 type="button"
                 onClick={() => setActiveEye(r.eye)}
-                className={`px-5 py-2 rounded-lg text-sm font-medium transition-all
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors
                   ${activeEye === r.eye
-                    ? 'bg-purple-600 text-white'
+                    ? 'bg-icons text-white shadow-sm shadow-black/20'
                     : 'text-white/40 hover:text-white'
                   }`}
               >
@@ -1056,8 +1075,8 @@ export default function TestResults() {
             </span>
             <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium
               ${runs[0].status === 'completed'
-                ? 'bg-green-500/15 border-green-500/30 text-green-300'
-                : 'bg-yellow-500/15 border-yellow-500/30 text-yellow-300'
+                ? 'bg-emerald-400/10 border-emerald-400/30 text-emerald-300'
+                : 'bg-amber-400/10 border-amber-400/30 text-amber-300'
               }`}>
               {runs[0].status}
             </span>
@@ -1094,7 +1113,7 @@ export default function TestResults() {
       {/* Email modal */}
       {emailOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#15152a] border border-white/10 rounded-2xl w-full max-w-lg p-6 flex flex-col gap-4">
+          <div className="bg-dark border border-outline/50 rounded-2xl w-full max-w-lg p-6 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">Email results to patient</h2>
               <button
@@ -1112,7 +1131,7 @@ export default function TestResults() {
                 type="email"
                 value={emailForm.to}
                 onChange={e => setEmailForm({ ...emailForm, to: e.target.value })}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                className="bg-white/5 border border-outline/50 rounded-lg px-3 py-2 text-sm text-white focus:border-lavender/60 focus:outline-none"
                 placeholder="patient@example.com"
               />
             </label>
@@ -1123,7 +1142,7 @@ export default function TestResults() {
                 type="text"
                 value={emailForm.subject}
                 onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+                className="bg-white/5 border border-outline/50 rounded-lg px-3 py-2 text-sm text-white focus:border-lavender/60 focus:outline-none"
               />
             </label>
 
@@ -1133,7 +1152,7 @@ export default function TestResults() {
                 rows={9}
                 value={emailForm.body}
                 onChange={e => setEmailForm({ ...emailForm, body: e.target.value })}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                className="bg-white/5 border border-outline/50 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-lavender/60 focus:outline-none"
               />
             </label>
 
@@ -1142,7 +1161,7 @@ export default function TestResults() {
             </p>
 
             {emailStatus && (
-              <p className={`text-xs ${emailStatus.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+              <p className={`text-xs ${emailStatus.type === 'success' ? 'text-emerald-300' : 'text-rose-300'}`}>
                 {emailStatus.msg}
               </p>
             )}
@@ -1159,7 +1178,7 @@ export default function TestResults() {
                 type="button"
                 onClick={handleSendEmail}
                 disabled={emailSending}
-                className="px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-40"
+                className="px-4 py-2 rounded-lg border border-lavender/20 text-sm bg-icons hover:bg-outline text-white disabled:opacity-40"
               >
                 {emailSending ? 'Sending…' : 'Send'}
               </button>

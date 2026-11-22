@@ -1,6 +1,11 @@
 import uuid
 from django.db import models
 from django.utils import timezone
+from config.validators import (
+    validate_gmail,
+    validate_person_name,
+    validate_ph_mobile,
+)
 
 
 def generate_patient_code():
@@ -31,12 +36,21 @@ class Patient(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient_code = models.CharField(max_length=64, blank=True, null=True, unique=True)
-    first_name = models.CharField(max_length=128)
-    last_name = models.CharField(max_length=128)
+    first_name = models.CharField(max_length=128, validators=[validate_person_name])
+    last_name = models.CharField(max_length=128, validators=[validate_person_name])
     sex = models.CharField(max_length=1, choices=SEX_CHOICES, default="U")
     birth_date = models.DateField(blank=True, null=True)
-    phone = models.CharField(max_length=32, blank=True, null=True)
-    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(
+        max_length=11,
+        blank=True,
+        null=True,
+        validators=[validate_ph_mobile],
+    )
+    email = models.EmailField(
+        blank=True,
+        null=True,
+        validators=[validate_gmail],
+    )
     assigned_doctor = models.CharField(max_length=128, blank=True, null=True)
     visual_condition = models.TextField(blank=True, null=True)
     case_history = models.TextField(blank=True, null=True)
