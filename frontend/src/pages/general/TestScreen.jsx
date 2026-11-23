@@ -17,6 +17,14 @@ import {
 } from '../../config/projection'
 import { drawGrid, drawDot } from '../../canvas/tangentGrid'
 import StimulusPreview from '../../components/StimulusPreview'
+import VoiceSettings from '../../components/VoiceSettings'
+import { useToast } from '../../context/ToastContext'
+import {
+  say, sayAndWait, speakParts, stopSpeaking, readVoicePrefs, hasFilipinoVoice,
+} from '../../audio/voiceGuide'
+import {
+  LINES, INSTRUCTION_INTRO, INSTRUCTION_OUTRO, buildInstructionSteps, calibrationLine,
+} from '../../audio/voiceScripts'
 
 // ─── Hard-coded default protocol ──────────────────────────────────────────────
 //
@@ -174,17 +182,36 @@ function drawCalibrationTarget(canvas, sx, sy, pulse) {
 // Projected to the patient, so the text is large and plain. Opens from the
 // Begin test button; Start test then runs handleStart (calibration → trials).
 function PreTestInstructions({ eye, eyeTracking, onBack, onStart }) {
-  const coveredEye = eye === 'OD' ? 'left' : eye === 'OS' ? 'right' : null
+  // Steps live in audio/voiceScripts.js so the Filipino reading stays in step
+  // with the English shown here
+  const stepParts = buildInstructionSteps({ eye, eyeTracking })
+  const steps = stepParts.map(step => step.en)
+  const toast = useToast()
 
-  const steps = [
-    'Sit comfortably and keep your head still for the whole test.',
-    coveredEye && `Keep your ${coveredEye} eye covered until the test is finished.`,
-    'Always look at the cross in the centre. Do not move your eyes to search for the dots.',
-    'First you will check your button and do a short practice, so you know what the dots look like.',
-    eyeTracking && 'First, a few dots will appear near the corners. Look at each one when asked. This lets the camera learn where you are looking.',
-    'Press the button as soon as you see a dot, whether it flashes or slowly moves in from the edge.',
-    'It is normal to miss some dots. Blink normally and stay relaxed.',
-  ].filter(Boolean)
+  // Read the instructions aloud: all of them in English, then in Filipino.
+  // Leaving the pop-up (Back or Start test) stops the reading.
+  useEffect(() => {
+    let cancelled = false
+    const prefs = readVoicePrefs()
+    const read = (lang) => [
+      { text: INSTRUCTION_INTRO[lang], lang },
+      ...stepParts.map(step => ({ text: step[lang], lang })),
+      { text: INSTRUCTION_OUTRO[lang], lang },
+    ]
+    speakParts([...read('en'), ...(prefs.readFilipino ? read('fil') : [])]).catch(() => {})
+    if (prefs.enabled && prefs.readFilipino) {
+      hasFilipinoVoice().then(has => {
+        if (!cancelled && !has) {
+          toast.info('No Filipino voice is installed, so the instructions are read in English only.', {
+            title: 'Filipino voice not found',
+          })
+        }
+      })
+    }
+    return () => { cancelled = true; stopSpeaking() }
+    // Read once per opening; stepParts and toast change identity every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eye, eyeTracking])
 
   return (
     <div
@@ -520,9 +547,16 @@ export default function TestScreen() {
   // re-mounts each component, and a flag left set by that dry run made the
   // button check quit at the first press.
   const unmountedRef = useRef(false)
+  // "The test is finished" is spoken once, whichever path completes the run
+  const finishedSpokenRef = useRef(false)
+  const announceFinished = useCallback(() => {
+    if (finishedSpokenRef.current) return
+    finishedSpokenRef.current = true
+    say(LINES.finished)
+  }, [])
   useEffect(() => {
     unmountedRef.current = false
-    return () => { unmountedRef.current = true }
+    return () => { unmountedRef.current = true; stopSpeaking() }
   }, [])
   // The button check runs until the clinician moves on: N key, the Next
   // button, or Next in the camera monitor (which calls pressNextRef)
@@ -731,6 +765,7 @@ export default function TestScreen() {
       await submitBatch()
       stopMediaPipeRef.current?.()
       setCompleted(true)
+      announceFinished()
       setStarted(false)
       return
     }
@@ -743,7 +778,7 @@ export default function TestScreen() {
     } else {
       runKineticTrialRef.current?.(nextPoint)
     }
-  }, [submitBatch])
+  }, [submitBatch, announceFinished])
 
   // ── Record a trial result locally ─────────────────────────────────────────
   function recordTrial(point, result, responseTimeMs, boundaryX = null, boundaryY = null) {
@@ -935,6 +970,7 @@ export default function TestScreen() {
 
         // Handle server-driven pause / abort
         if (state.status === 'completed' || state.status === 'aborted') {
+          if (state.status === 'completed') announceFinished()
           setCompleted(true)
           setStarted(false)
           endTrial()
@@ -960,6 +996,7 @@ export default function TestScreen() {
             fixationPausedRef.current = true
             setFixationPaused(true)
             endTrial()
+            say(LINES.fixationLost)
           }
         }
       } catch (err) {
@@ -971,7 +1008,7 @@ export default function TestScreen() {
     // 500ms so a fixation loss halts the test quickly (was 1s)
     const interval = setInterval(poll, 500)
     return () => clearInterval(interval)
-  }, [started, runId, authFetch, endTrial])
+  }, [started, runId, authFetch, endTrial, announceFinished])
 
   // ── Gaze polling during overlay / fixation pause ──────────────────────────
   useEffect(() => {
@@ -1049,6 +1086,7 @@ export default function TestScreen() {
   }, [runId, authFetch])
 
   async function handleCancelTest() {
+    stopSpeaking()
     setCalibMessage('Cancelling test…')
     try {
       await sendCommand('abort')
@@ -1072,6 +1110,7 @@ export default function TestScreen() {
   function handleBackToPreviousPage() {
     // Abort/stop tracking in the background, then return to the page that
     // opened the canvas instead of navigating to a hard-coded route.
+    stopSpeaking()
     sendCommand('abort').catch(() => {})
     Promise.resolve(stopMediaPipeRef.current?.()).catch(() => {})
     navigate(-1)
@@ -1234,9 +1273,11 @@ export default function TestScreen() {
           setCalibMessage(attempt === 0
             ? 'Stare at the dot, then press Space'
             : 'Face not detected — stare at the dot and press again')
+          say(attempt === 0 ? calibrationLine(sx, sy) : LINES.calibRetry)
           await waitForPress()
           setCalibStep({ index: i, sampling: true })
           setCalibMessage('Hold still…')
+          say(LINES.calibHold)
           sample = await sampleIrisRatios()
         }
 
@@ -1366,6 +1407,7 @@ export default function TestScreen() {
       setStage({ kind: 'device', presses: info.presses, input: info.input })
       postButtonCheck()
     }
+    say(LINES.buttonCheck)
     try {
       for (;;) {
         update()
@@ -1394,9 +1436,11 @@ export default function TestScreen() {
     for (;;) {
       if (unmountedRef.current) return
       setStage({ kind: 'practiceIntro' })
+      say(LINES.practiceIntro)
       const start = await waitForPress()
       if (start?.skip || unmountedRef.current) { setStage(null); return }
       setStage(null)
+      stopSpeaking() // never talk over the practice dots
 
       const trials = buildPracticeTrials()
       const results = []
@@ -1409,6 +1453,7 @@ export default function TestScreen() {
       setCalibMessage('')
 
       setStage({ kind: 'practiceResult', summary: summarizePractice(results) })
+      say(LINES.practiceDone)
       const choice = await waitForChoice()
       if (choice !== 'again') { setStage(null); return }
     }
@@ -1469,11 +1514,14 @@ export default function TestScreen() {
         // calibration has already shown its own message.)
         if (calibrated) {
           setStage({ kind: 'calibrated' })
+          say(LINES.calibrated)
           await waitForPress()
           setStage(null)
         }
       }
 
+      await sayAndWait(LINES.testStart)
+      if (unmountedRef.current) return
       await runCountdown()
       if (unmountedRef.current) return
     } finally {
@@ -1497,6 +1545,8 @@ export default function TestScreen() {
     await sendCommand('resume')
     setOverlay(false)
     setPaused(false)
+    // Finish the line before the next dot, so the voice never overlaps a stimulus
+    await sayAndWait(LINES.resumed)
 
     // Resume from the current local point index
     const point = DEFAULT_POINTS[currentPointIndexRef.current]
@@ -1516,6 +1566,7 @@ export default function TestScreen() {
     setOverlay(true)
     setPaused(true)
     endTrial()
+    say(LINES.paused)
   }
 
   // ── Completed screen ──────────────────────────────────────────────────────
@@ -1962,6 +2013,10 @@ export default function TestScreen() {
                 across on the screen, both horizontally and vertically.
                 Change the distance in Settings → Projector setup.
               </p>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <VoiceSettings />
             </div>
           </div>
         </div>

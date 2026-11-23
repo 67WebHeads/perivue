@@ -3,6 +3,8 @@ import VideocamIcon from "@mui/icons-material/Videocam";
 import CastIcon from "@mui/icons-material/Cast";
 import TuneIcon from "@mui/icons-material/Tune";
 import StimulusPreview from "../../components/StimulusPreview";
+import VoiceSettings from "../../components/VoiceSettings";
+import RecordVoiceOverIcon from "@mui/icons-material/RecordVoiceOver";
 import { BROWSER_TRACKING, CAMERA_STORAGE_KEY } from "../../tracking/browserTracker";
 import {
   STIMULUS_COLORS,
@@ -511,6 +513,29 @@ function ProjectorSetup() {
   );
 }
 
+// ── Voice instructions ────────────────────────────────────────────────────────
+// Spoken prompts during the test (browser text-to-speech). Same saved settings
+// as the voice controls in the test screen's gear modal.
+function VoiceInstructionsCard() {
+  return (
+    <div className="flex flex-col gap-4 rounded-3xl border border-zinc-400/10 bg-white/5 p-5">
+      <div className="flex items-center gap-3">
+        <span className="text-base-content/50">
+          <RecordVoiceOverIcon />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Voice instructions</p>
+          <p className="text-xs text-base-content/50">
+            Reads the instructions aloud in English and Filipino, and speaks short English
+            prompts during the test. Silent while dots are on screen.
+          </p>
+        </div>
+      </div>
+      <VoiceSettings />
+    </div>
+  );
+}
+
 function Settings() {
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
@@ -519,6 +544,7 @@ function Settings() {
         <p className="text-sm text-base-content/50">Settings for this browser on this device</p>
       </div>
       <TestDisplaySettings />
+      <VoiceInstructionsCard />
       <ProjectorSetup />
       <CameraSettings />
     </div>
